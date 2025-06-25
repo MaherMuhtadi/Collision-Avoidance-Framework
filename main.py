@@ -108,11 +108,18 @@ def main():
         print("CARLA server connection timed out.")
         return
 
+    # Set the world to synchronous mode for precise control    
+    settings = world.get_settings()
+    settings.synchronous_mode = True
+    settings.fixed_delta_seconds = 1.0 / 30.0  # 30 FPS
+    world.apply_settings(settings)
+
     blueprint_library = world.get_blueprint_library()
     spawn_points = world.get_map().get_spawn_points()
 
     # Initialize traffic manager
     traffic_manager = client.get_trafficmanager()
+    traffic_manager.set_synchronous_mode(True)
     traffic_manager.set_global_distance_to_leading_vehicle(0.0)
 
     # Spawn the ego vehicle (Tesla Model 3) with collision evasion settings
@@ -243,8 +250,7 @@ def main():
     # Main simulation loop
     while running:
         try:
-            time.sleep(1.0 / 30.0)  # Simulate ~30 FPS polling
-            _ = world.get_snapshot()
+            world.tick()
             update_spectator()
         except RuntimeError as e:
             print("Runtime error during simulation:", e)
@@ -255,6 +261,7 @@ def main():
         for sensor in [camera, lidar, imu_sensor, gnss_sensor, collision_sensor]:
             if sensor is not None:
                 sensor.stop()
+        time.sleep(1.0)
         save_data(frame_data)
     except Exception as e:
         print("Error during cleanup:", e)
