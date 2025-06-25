@@ -142,7 +142,7 @@ wheels = [
 ]
 
 [[package]]
-name = "project"
+name = "Collision-Avoidance-Framework"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
