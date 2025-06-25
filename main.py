@@ -285,4 +285,5 @@ if __name__ == '__main__':
             process.wait()
         except Exception as e:
             print("Error while terminating CARLA:", e)
+        kill_zombie_carla_processes()
         print("Simulation completed.")
