@@ -8,6 +8,7 @@ import signal
 import subprocess
 import psutil
 from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor
 
 load_dotenv()
 
@@ -40,25 +41,35 @@ def kill_zombie_carla_processes():
             continue
     print("All zombie CARLA processes terminated.")
 
+def save_single_frame(frame_id, data):
+    # Save only if all required modalities are present
+    if all(k in data for k in ["camera_data", "lidar_data", "imu", "gnss"]):
+        path_img = f'Camera/camera_{frame_id:06d}.png'
+        data['camera_data'].save_to_disk(path_img)
+        data['camera_path'] = path_img
+        del data['camera_data']
+
+        path_lidar = f'Lidar/lidar_{frame_id:06d}.npy'
+        np.save(path_lidar, data['lidar_data'])
+        data['lidar_path'] = path_lidar
+        del data['lidar_data']
+        return frame_id, data
+    else:
+        return frame_id, None
+
 def save_data(frame_data):
     valid_frame_data = {}
     dropped_frames = []
     total_frames_seen = set()
 
-    print("Processing frame data...")
-    for frame_id, data in frame_data.items():
+    print("Processing frame data with parallel saving...")
+    items = list(frame_data.items())
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        results = list(executor.map(lambda item: save_single_frame(*item), items))
+
+    for frame_id, data in results:
         total_frames_seen.add(frame_id)
-        if all(k in data for k in ["camera_data", "lidar_data", "imu", "gnss"]):
-            cam_path = f'Camera/camera_{frame_id:06d}.png'
-            data['camera_data'].save_to_disk(cam_path)
-            data['camera_path'] = cam_path
-            del data['camera_data']
-
-            lidar_path = f'Lidar/lidar_{frame_id:06d}.csv'
-            np.savetxt(lidar_path, data['lidar_data'], delimiter=',')
-            data['lidar_path'] = lidar_path
-            del data['lidar_data']
-
+        if data is not None:
             valid_frame_data[frame_id] = data
         else:
             dropped_frames.append(frame_id)
@@ -69,8 +80,6 @@ def save_data(frame_data):
 
     with open('Logs/simulation_log.json', 'w') as f:
         json.dump(valid_frame_data, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
     print("Frame data log saved.")
 
     with open('Logs/frame_summary.json', 'w') as f:
@@ -80,8 +89,6 @@ def save_data(frame_data):
             "dropped_frames": dropped_count,
             "dropped_frame_ids": sorted(dropped_frames)
         }, f, indent=2)
-        f.flush()
-        os.fsync(f.fileno())
     print("Frame drop summary saved.")
 
 def main():
@@ -281,7 +288,7 @@ if __name__ == '__main__':
     finally:
         print("Terminating CARLA server...")
         try:
-            os.killpg(os.getpgid(process.pid), signal.SIGTERM)  # Gracefully terminate CARLA
+            os.killpg(os.getpgid(process.pid), signal.SIGTERM)
             process.wait()
         except Exception as e:
             print("Error while terminating CARLA:", e)
