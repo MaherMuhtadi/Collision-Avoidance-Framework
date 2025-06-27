@@ -280,7 +280,7 @@ if __name__ == '__main__':
         kill_zombie_carla_processes()
         print("Starting CARLA server...")
         process = subprocess.Popen(
-            [os.environ["CARLA_PATH"], "--quality=low"],
+            [os.environ["CARLA_PATH"], "Town06", "--quality=low"],
             shell=False,
             preexec_fn=os.setsid  # Starts a new process group on Unix 
         )
