@@ -106,8 +106,9 @@ def main():
         try:
             client = carla.Client('localhost', 2000)
             client.set_timeout(10.0)
+            client.load_world("Town06")
             world = client.get_world()
-            print("Connected to CARLA server. Running simulation...")
+            print(f"Connected to CARLA server. Loaded {world.get_map().name}. Running simulation...")
             break
         except Exception:
             time.sleep(1)
@@ -280,7 +281,7 @@ if __name__ == '__main__':
         kill_zombie_carla_processes()
         print("Starting CARLA server...")
         process = subprocess.Popen(
-            [os.environ["CARLA_PATH"], "Town06", "--quality=low"],
+            [os.environ["CARLA_PATH"], "--quality=low"],
             shell=False,
             preexec_fn=os.setsid  # Starts a new process group on Unix 
         )
