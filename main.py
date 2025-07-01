@@ -95,8 +95,6 @@ def main():
     global running
     ego = camera = lidar = imu_sensor = gnss_sensor = collision_sensor = None
     npc_vehicles = []
-    pedestrians = []
-    walker_controllers = []
     frame_data = {} # Dictionary to store frame data for logging
 
     # Connect to the CARLA server
@@ -128,18 +126,18 @@ def main():
     # Initialize traffic manager
     traffic_manager = client.get_trafficmanager()
     traffic_manager.set_synchronous_mode(True)
-    traffic_manager.set_global_distance_to_leading_vehicle(0.0)
+    traffic_manager.set_global_distance_to_leading_vehicle(5)
+    traffic_manager.global_percentage_speed_difference(30)
 
-    # Spawn the ego vehicle (Tesla Model 3) with collision evasion settings
+    # Spawn the ego vehicle (Tesla Model 3)
     spawn_point = random.choice(spawn_points)
     vehicle_bp = blueprint_library.find('vehicle.tesla.model3')
     ego = world.spawn_actor(vehicle_bp, spawn_point)
     ego.set_autopilot(True, traffic_manager.get_port())
-    traffic_manager.distance_to_leading_vehicle(ego, 5.0)
+    traffic_manager.vehicle_percentage_speed_difference(ego, -50.0)  # Makes ego 50% faster
+    traffic_manager.distance_to_leading_vehicle(ego, 2.0)
     traffic_manager.ignore_lights_percentage(ego, 100.0) # Ignore traffic lights to reduce uneventful frames
     traffic_manager.ignore_signs_percentage(ego, 100.0) # Ignore stop signs to reduce uneventful frames
-    traffic_manager.ignore_vehicles_percentage(ego, 0.0)
-    traffic_manager.ignore_walkers_percentage(ego, 0.0)
 
     # Create output directories if they don't exist
     os.makedirs('Camera', exist_ok=True)
@@ -218,42 +216,16 @@ def main():
     gnss_sensor.listen(process_gnss)
     collision_sensor.listen(process_collision)
 
-    # Spawn 50 reckless NPC vehicles
+    # Spawn 80 reckless NPC vehicles
     random.shuffle(spawn_points)
-    for i, spawn_point in enumerate(spawn_points[:50]):
+    for _, spawn_point in enumerate(spawn_points[:80]):
         npc_bp = random.choice(blueprint_library.filter('vehicle.*'))
         npc = world.try_spawn_actor(npc_bp, spawn_point)
         if npc:
             npc.set_autopilot(True, traffic_manager.get_port())
-            traffic_manager.distance_to_leading_vehicle(npc, 0.0)
-            traffic_manager.vehicle_percentage_speed_difference(npc, -30.0)
             traffic_manager.ignore_lights_percentage(npc, 100.0)
             traffic_manager.ignore_signs_percentage(npc, 100.0)
-            traffic_manager.ignore_vehicles_percentage(npc, 100.0)
-            traffic_manager.ignore_walkers_percentage(npc, 100.0)
-            direction = random.choice([True, False])  # True = right, False = left
-            traffic_manager.force_lane_change(npc, direction)
             npc_vehicles.append(npc)
-
-    # Spawn 30 pedestrians to further increase collision chances
-    for _ in range(30):
-        walker_bp = random.choice(blueprint_library.filter('walker.pedestrian.*'))
-        controller_bp = blueprint_library.find('controller.ai.walker')
-        loc = random.choice(spawn_points).location
-        loc.z += 1
-        walker = world.try_spawn_actor(walker_bp, carla.Transform(loc))
-        if walker:
-            pedestrians.append(walker)
-            controller = world.spawn_actor(controller_bp, carla.Transform(), attach_to=walker)
-            walker_controllers.append(controller)
-            controller.start()
-            # Increase pedestrian riskiness
-            num_movements = random.randint(3, 6)
-            for _ in range(num_movements):
-                destination = world.get_random_location_from_navigation()
-                if destination:
-                    controller.go_to_location(destination)
-                    controller.set_max_speed(2.0 + random.random() * 2.0)  # Walk fast
 
     # Main simulation loop
     while running:
@@ -270,7 +242,7 @@ def main():
             if sensor is not None:
                 sensor.stop()
         time.sleep(1.0)
-        save_data(frame_data)
+        # save_data(frame_data)
     except Exception as e:
         print("Error during cleanup:", e)
 
