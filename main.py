@@ -216,7 +216,7 @@ def main():
     gnss_sensor.listen(process_gnss)
     collision_sensor.listen(process_collision)
 
-    # Spawn 80 reckless NPC vehicles
+    # Spawn 80 NPC vehicles
     random.shuffle(spawn_points)
     for _, spawn_point in enumerate(spawn_points[:80]):
         npc_bp = random.choice(blueprint_library.filter('vehicle.*'))
@@ -242,7 +242,7 @@ def main():
             if sensor is not None:
                 sensor.stop()
         time.sleep(1.0)
-        # save_data(frame_data)
+        save_data(frame_data)
     except Exception as e:
         print("Error during cleanup:", e)
 
