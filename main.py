@@ -3,14 +3,12 @@ import carla
 import random
 import time
 import numpy as np
-import json
+import pickle
 import signal
 import pygame
-import numpy as np
 import subprocess
 import psutil
 from dotenv import load_dotenv
-from concurrent.futures import ThreadPoolExecutor
 
 load_dotenv()
 
@@ -42,56 +40,6 @@ def kill_zombie_carla_processes():
         except (psutil.NoSuchProcess, psutil.AccessDenied):
             continue
     print("All zombie CARLA processes terminated.")
-
-def save_single_frame(frame_id, data):
-    # Save only if all required modalities are present
-    if all(k in data for k in ["camera_data", "lidar_data", "imu", "gnss"]):
-        path_img = f'Camera/camera_{frame_id:06d}.png'
-        data['camera_data'].save_to_disk(path_img)
-        data['camera_path'] = path_img
-        del data['camera_data']
-
-        path_lidar = f'Lidar/lidar_{frame_id:06d}.npy'
-        np.save(path_lidar, data['lidar_data'])
-        data['lidar_path'] = path_lidar
-        del data['lidar_data']
-        return frame_id, data
-    else:
-        return frame_id, None
-
-def save_data(frame_data):
-    valid_frame_data = {}
-    dropped_frames = []
-    total_frames_seen = set()
-
-    print("Processing frame data with parallel saving...")
-    items = list(frame_data.items())
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        results = list(executor.map(lambda item: save_single_frame(*item), items))
-
-    for frame_id, data in results:
-        total_frames_seen.add(frame_id)
-        if data is not None:
-            valid_frame_data[frame_id] = data
-        else:
-            dropped_frames.append(frame_id)
-
-    total_frames = len(total_frames_seen)
-    stored_frames = len(valid_frame_data)
-    dropped_count = len(dropped_frames)
-
-    with open('Logs/simulation_log.json', 'w') as f:
-        json.dump(valid_frame_data, f, indent=2)
-    print("Frame data log saved.")
-
-    with open('Logs/frame_summary.json', 'w') as f:
-        json.dump({
-            "total_frames_played": total_frames,
-            "stored_frames": stored_frames,
-            "dropped_frames": dropped_count,
-            "dropped_frame_ids": sorted(dropped_frames)
-        }, f, indent=2)
-    print("Frame drop summary saved.")
 
 def main():
     global running
@@ -142,11 +90,6 @@ def main():
     traffic_manager.ignore_lights_percentage(ego, 100.0) # Ignore traffic lights to reduce uneventful frames
     traffic_manager.ignore_signs_percentage(ego, 100.0) # Ignore stop signs to reduce uneventful frames
 
-    # Create output directories if they don't exist
-    os.makedirs('Camera', exist_ok=True)
-    os.makedirs('Lidar', exist_ok=True)
-    os.makedirs('Logs', exist_ok=True)
-
     # Attach RGB camera sensor to vehicle
     camera_bp = blueprint_library.find('sensor.camera.rgb')
     camera_bp.set_attribute('sensor_tick', str(1.0 / 30.0))
@@ -186,10 +129,11 @@ def main():
 
     # Callback functions to process and store sensor data
     def process_image(image):
-        frame_data.setdefault(image.frame, {})['camera_data'] = image
+        array = np.frombuffer(image.raw_data, dtype=np.uint8).reshape((image.height, image.width, 4)).copy()
+        frame_data.setdefault(image.frame, {})['camera_data'] = array[:, :, :3]
 
     def process_lidar(point_cloud):
-        data = np.frombuffer(point_cloud.raw_data, dtype=np.float32).reshape(-1, 4)
+        data = np.frombuffer(point_cloud.raw_data, dtype=np.float32).reshape(-1, 4).copy()
         frame_data.setdefault(point_cloud.frame, {})['lidar_data'] = data
 
     def process_imu(imu):
@@ -269,6 +213,7 @@ def main():
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
+                    print("Status window closed. Stopping simulation...")
                     running = False
 
         except RuntimeError as e:
@@ -281,7 +226,9 @@ def main():
             if sensor is not None:
                 sensor.stop()
         time.sleep(1.0)
-        save_data(frame_data)
+        with open('Logs/raw_frame_data.pkl', 'wb') as f:
+            pickle.dump(frame_data, f)
+        print("Raw frame data saved for post-processing.")
     except Exception as e:
         print("Error during cleanup:", e)
 

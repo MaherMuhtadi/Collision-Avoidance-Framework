@@ -7,6 +7,7 @@ requires-python = "==3.10.*"
 dependencies = [
     "carla>=0.9.15",
     "numpy>=2.2.6",
+    "pillow>=11.3.0",
     "psutil>=7.0.0",
     "pygame>=2.6.1",
     "python-dotenv>=1.1.1",
