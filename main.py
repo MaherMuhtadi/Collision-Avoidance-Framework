@@ -207,6 +207,9 @@ def main():
     while running:
         try:
             elapsed_time = int(time.time() - start_sim_time)
+            if elapsed_time >= 3600:
+                print("Simulation time limit reached (1 hour). Stopping simulation...")
+                running = False
             world.tick()
             update_spectator()
             update_status(ego, elapsed_time)
