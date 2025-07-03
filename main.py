@@ -87,6 +87,9 @@ def main():
     ego.set_autopilot(True, traffic_manager.get_port())
     traffic_manager.vehicle_percentage_speed_difference(ego, -30.0)  # Makes ego 30% faster
     traffic_manager.distance_to_leading_vehicle(ego, 1.0)
+    traffic_manager.auto_lane_change(ego, True)
+    traffic_manager.random_left_lanechange_percentage(ego, 100)
+    traffic_manager.random_right_lanechange_percentage(ego, 100)
     traffic_manager.ignore_lights_percentage(ego, 100.0) # Ignore traffic lights to reduce uneventful frames
     traffic_manager.ignore_signs_percentage(ego, 100.0) # Ignore stop signs to reduce uneventful frames
 
