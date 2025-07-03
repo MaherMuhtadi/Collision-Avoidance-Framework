@@ -15,7 +15,9 @@ def save_single_frame(frame_id, data):
     if all(k in data for k in ["camera_data", "lidar_data", "imu", "gnss"]):
         # Save RGB camera image
         path_img = f'Camera/camera_{frame_id:06d}.png'
-        img = Image.fromarray(data['camera_data'])
+        bgr_array = data['camera_data']
+        rgb_array = bgr_array[:, :, ::-1]  # BGR to RGB
+        img = Image.fromarray(rgb_array)
         img.save(path_img)
         data['camera_path'] = path_img
         del data['camera_data']
