@@ -47,6 +47,7 @@ def main():
     npc_vehicles = []
     frame_data = {} # Dictionary to store frame data for logging
     collision_count = 0
+    last_collision_actor = "None" # Variable to store the most recent actor collided with
 
     # Connect to the CARLA server
     print("Connecting to CARLA server...")
@@ -153,12 +154,9 @@ def main():
         }
 
     def process_collision(event):
-        nonlocal collision_count
+        nonlocal collision_count, last_collision_actor
         collision_count += 1
-        frame_data.setdefault(event.frame, {})['collision'] = {
-            'other_actor': event.other_actor.type_id,
-            'impact_point': [event.normal_impulse.x, event.normal_impulse.y, event.normal_impulse.z]
-        }
+        last_collision_actor = event.other_actor.type_id
 
     # Register callbacks with sensors
     camera.listen(process_image)
@@ -182,7 +180,7 @@ def main():
     pygame.init()
     pygame.font.init()
     font = pygame.font.SysFont("Arial", 12)
-    status_display = pygame.display.set_mode((250, 80))
+    status_display = pygame.display.set_mode((250, 100))
     pygame.display.set_caption("Ego Vehicle Status")
 
     def update_status(vehicle, time):
@@ -195,13 +193,15 @@ def main():
         status_display.fill((30, 30, 30))
         speed_text = font.render(f"Speed: {speed_kmh:.1f} km/h", True, (255, 255, 255))
         limit_text = font.render(f"Speed Limit: {speed_limit:.1f} km/h", True, (200, 200, 0))
-        collision_text = font.render(f"Collisions: {collision_count}", True, (255, 100, 100))
+        collision_counter_text = font.render(f"Collisions: {collision_count}", True, (255, 100, 100))
+        collision_actor_text = font.render(f"Last Collision: {last_collision_actor}", True, (255, 150, 0))
         runtime_text = font.render(f"Run Time: {hours:02}:{minutes:02}:{seconds:02}", True, (0, 200, 255))
         
         status_display.blit(speed_text, (10, 10))
         status_display.blit(limit_text, (10, 27))
-        status_display.blit(collision_text, (10, 44))
-        status_display.blit(runtime_text, (10, 61))
+        status_display.blit(collision_counter_text, (10, 44))
+        status_display.blit(collision_actor_text, (10, 61))
+        status_display.blit(runtime_text, (10, 78))
         pygame.display.flip()
 
     start_sim_time = time.time() # Start time of simulation
