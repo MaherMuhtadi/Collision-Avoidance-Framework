@@ -10,9 +10,12 @@ os.makedirs('Camera', exist_ok=True)
 os.makedirs('Lidar', exist_ok=True)
 os.makedirs('Logs', exist_ok=True)
 
+REQUIRED_MODALITIES = ["camera_data", "lidar_data", "imu", "gnss", "autopilot"]
+
 def save_single_frame(frame_id, data):
-    # Save only if all required modalities are present
-    if all(k in data for k in ["camera_data", "lidar_data", "imu", "gnss", "autopilot"]):
+    missing = [mod for mod in REQUIRED_MODALITIES if mod not in data]
+
+    if not missing:
         # Save RGB camera image
         path_img = f'Camera/camera_{frame_id:06d}.png'
         bgr_array = data['camera_data']
@@ -28,43 +31,46 @@ def save_single_frame(frame_id, data):
         data['lidar_path'] = path_lidar
         del data['lidar_data']
 
-        return frame_id, data
+        return frame_id, data, None
     else:
-        return frame_id, None
+        return frame_id, None, missing
 
-def process_raw_frames(input_file='Logs/raw_frame_data.pkl'):
+def filter_raw_frames(input_file='Logs/raw_frame_data.pkl'):
     with open(input_file, 'rb') as f:
         frame_data = pickle.load(f)
 
     valid_frame_data = {}
-    dropped_frames = []
+    dropped_frames = {}
     total_frames_seen = set()
 
-    print("Processing frame data...")
+    print("Filtering frame data...")
     items = list(frame_data.items())
     with ThreadPoolExecutor(max_workers=8) as executor:
         results = list(executor.map(lambda item: save_single_frame(*item), items))
 
-    for frame_id, data in results:
+    for frame_id, data, missing in results:
         total_frames_seen.add(frame_id)
         if data:
             valid_frame_data[frame_id] = data
         else:
-            dropped_frames.append(frame_id)
+            dropped_frames[frame_id] = missing
 
+    # Save valid frames
     with open('Logs/simulation_log.json', 'w') as f:
         json.dump(valid_frame_data, f, indent=2)
     print("Frame data log saved.")
+
+    # Save summary
     with open('Logs/frame_summary.json', 'w') as f:
         json.dump({
             "total_frames_played": len(total_frames_seen),
             "stored_frames": len(valid_frame_data),
             "dropped_frames": len(dropped_frames),
-            "dropped_frame_ids": sorted(dropped_frames)
+            "missing_data": {str(fid): mods for fid, mods in sorted(dropped_frames.items())}
         }, f, indent=2)
     print("Frame drop summary saved.")
 
-    print("Frame data processing complete.")
+    print("Frame data filtering complete.")
 
 if __name__ == "__main__":
-    process_raw_frames()
+    filter_raw_frames()
