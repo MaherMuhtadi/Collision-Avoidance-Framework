@@ -132,38 +132,48 @@ def main():
         spectator.set_transform(carla.Transform(location, rotation))
 
     # Callback functions to process and store sensor data
-    def process_image(image):
+    def log_image(image):
         array = np.frombuffer(image.raw_data, dtype=np.uint8).reshape((image.height, image.width, 4)).copy()
         frame_data.setdefault(image.frame, {})['camera_data'] = array[:, :, :3]
 
-    def process_lidar(point_cloud):
+    def log_lidar(point_cloud):
         data = np.frombuffer(point_cloud.raw_data, dtype=np.float32).reshape(-1, 4).copy()
         frame_data.setdefault(point_cloud.frame, {})['lidar_data'] = data
 
-    def process_imu(imu):
+    def log_imu(imu):
         frame_data.setdefault(imu.frame, {})['imu'] = {
             'acc': [imu.accelerometer.x, imu.accelerometer.y, imu.accelerometer.z],
             'gyro': [imu.gyroscope.x, imu.gyroscope.y, imu.gyroscope.z]
         }
 
-    def process_gnss(gnss):
+    def log_gnss(gnss):
         frame_data.setdefault(gnss.frame, {})['gnss'] = {
             'lat': gnss.latitude,
             'lon': gnss.longitude,
             'alt': gnss.altitude
         }
 
-    def process_collision(event):
+    def log_collision(event):
         nonlocal collision_count, last_collision_actor
         collision_count += 1
         last_collision_actor = event.other_actor.type_id
+    
+    # Log autopilot actions
+    def log_actions():
+        control = ego.get_control()
+        frame_id = ego.get_world().get_snapshot().frame
+        frame_data.setdefault(frame_id, {})['autopilot'] = {
+            'steer': float(control.steer),
+            'throttle': float(control.throttle),
+            'brake': float(control.brake)
+        }
 
     # Register callbacks with sensors
-    camera.listen(process_image)
-    lidar.listen(process_lidar)
-    imu_sensor.listen(process_imu)
-    gnss_sensor.listen(process_gnss)
-    collision_sensor.listen(process_collision)
+    camera.listen(log_image)
+    lidar.listen(log_lidar)
+    imu_sensor.listen(log_imu)
+    gnss_sensor.listen(log_gnss)
+    collision_sensor.listen(log_collision)
 
     # Spawn 80 NPC vehicles
     random.shuffle(spawn_points)
@@ -183,10 +193,10 @@ def main():
     status_display = pygame.display.set_mode((250, 100))
     pygame.display.set_caption("Ego Vehicle Status")
 
-    def update_status(vehicle, time):
-        velocity = vehicle.get_velocity()
+    def update_status():
+        velocity = ego.get_velocity()
         speed_kmh = 3.6 * np.sqrt(velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2)
-        speed_limit = vehicle.get_speed_limit()
+        speed_limit = ego.get_speed_limit()
         hours, remainder = divmod(elapsed_time, 3600)
         minutes, seconds = divmod(remainder, 60)
         
@@ -214,8 +224,9 @@ def main():
                 print("Simulation time limit reached (1 hour). Stopping simulation...")
                 running = False
             world.tick()
+            log_actions()
             update_spectator()
-            update_status(ego, elapsed_time)
+            update_status()
 
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:

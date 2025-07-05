@@ -12,7 +12,7 @@ os.makedirs('Logs', exist_ok=True)
 
 def save_single_frame(frame_id, data):
     # Save only if all required modalities are present
-    if all(k in data for k in ["camera_data", "lidar_data", "imu", "gnss"]):
+    if all(k in data for k in ["camera_data", "lidar_data", "imu", "gnss", "autopilot"]):
         # Save RGB camera image
         path_img = f'Camera/camera_{frame_id:06d}.png'
         bgr_array = data['camera_data']
