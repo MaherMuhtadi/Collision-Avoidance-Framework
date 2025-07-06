@@ -146,11 +146,11 @@ def main():
         collision_count += 1
         last_collision_actor = event.other_actor.type_id
     
-    # Log autopilot actions
+    # Log expert actions
     def log_actions():
         control = ego.get_control()
         frame_id = ego.get_world().get_snapshot().frame
-        frame_data.setdefault(frame_id, {})['autopilot'] = {
+        frame_data.setdefault(frame_id, {})['actions'] = {
             'steer': float(control.steer),
             'throttle': float(control.throttle),
             'brake': float(control.brake)
