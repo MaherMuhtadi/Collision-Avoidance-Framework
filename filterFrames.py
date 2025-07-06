@@ -35,7 +35,7 @@ def save_single_frame(frame_id, data):
     else:
         return frame_id, None, missing
 
-def filter_raw_frames(input_file='Logs/raw_frame_data.pkl'):
+def filter_raw_frames(input_file='Logs/raw_data.pkl'):
     with open(input_file, 'rb') as f:
         frame_data = pickle.load(f)
 
@@ -56,9 +56,9 @@ def filter_raw_frames(input_file='Logs/raw_frame_data.pkl'):
             dropped_frames[frame_id] = missing
 
     # Save valid frames
-    with open('Logs/simulation_log.json', 'w') as f:
+    with open('Logs/filtered_data.json', 'w') as f:
         json.dump(valid_frame_data, f, indent=2)
-    print("Frame data log saved.")
+    print("Filtered frame data saved.")
 
     # Save summary
     with open('Logs/frame_summary.json', 'w') as f:
@@ -69,8 +69,6 @@ def filter_raw_frames(input_file='Logs/raw_frame_data.pkl'):
             "missing_data": {str(fid): mods for fid, mods in sorted(dropped_frames.items())}
         }, f, indent=2)
     print("Frame drop summary saved.")
-
-    print("Frame data filtering complete.")
 
 if __name__ == "__main__":
     filter_raw_frames()

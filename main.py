@@ -230,9 +230,9 @@ def main():
             if sensor is not None:
                 sensor.stop()
         time.sleep(1.0)
-        with open('Logs/raw_frame_data.pkl', 'wb') as f:
+        with open('Logs/raw_data.pkl', 'wb') as f:
             pickle.dump(frame_data, f)
-        print("Raw frame data saved for post-processing.")
+        print("Raw data saved for processing.")
     except Exception as e:
         print("Error during cleanup:", e)
 
