@@ -43,7 +43,7 @@ def kill_zombie_carla_processes():
 
 def main():
     global running
-    ego = camera = lidar = imu_sensor = gnss_sensor = collision_sensor = None
+    ego = camera = lidar = imu_sensor = collision_sensor = None
     npc_vehicles = []
     frame_data = {} # Dictionary to store frame data for logging
     collision_count = 0
@@ -113,11 +113,6 @@ def main():
     imu_bp.set_attribute('sensor_tick', str(1.0 / 30.0))
     imu_sensor = world.spawn_actor(imu_bp, carla.Transform(), attach_to=ego)
     
-    # Attach GNSS sensor to vehicle
-    gnss_bp = blueprint_library.find('sensor.other.gnss')
-    gnss_bp.set_attribute('sensor_tick', str(1.0 / 30.0))
-    gnss_sensor = world.spawn_actor(gnss_bp, carla.Transform(), attach_to=ego)
-    
     # Attach collision sensor to vehicle
     collision_bp = blueprint_library.find('sensor.other.collision')
     collision_sensor = world.spawn_actor(collision_bp, carla.Transform(), attach_to=ego)
@@ -146,13 +141,6 @@ def main():
             'gyro': [imu.gyroscope.x, imu.gyroscope.y, imu.gyroscope.z]
         }
 
-    def log_gnss(gnss):
-        frame_data.setdefault(gnss.frame, {})['gnss'] = {
-            'lat': gnss.latitude,
-            'lon': gnss.longitude,
-            'alt': gnss.altitude
-        }
-
     def log_collision(event):
         nonlocal collision_count, last_collision_actor
         collision_count += 1
@@ -172,7 +160,6 @@ def main():
     camera.listen(log_image)
     lidar.listen(log_lidar)
     imu_sensor.listen(log_imu)
-    gnss_sensor.listen(log_gnss)
     collision_sensor.listen(log_collision)
 
     # Spawn 80 NPC vehicles
@@ -239,7 +226,7 @@ def main():
 
     # Cleanup: stop sensors and save data
     try:
-        for sensor in [camera, lidar, imu_sensor, gnss_sensor, collision_sensor]:
+        for sensor in [camera, lidar, imu_sensor, collision_sensor]:
             if sensor is not None:
                 sensor.stop()
         time.sleep(1.0)

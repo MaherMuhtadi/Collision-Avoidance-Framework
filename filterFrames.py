@@ -10,7 +10,7 @@ os.makedirs('Camera', exist_ok=True)
 os.makedirs('Lidar', exist_ok=True)
 os.makedirs('Logs', exist_ok=True)
 
-REQUIRED_MODALITIES = ["camera_data", "lidar_data", "imu", "gnss", "autopilot"]
+REQUIRED_MODALITIES = ["camera_data", "lidar_data", "imu", "autopilot"]
 
 def save_single_frame(frame_id, data):
     missing = [mod for mod in REQUIRED_MODALITIES if mod not in data]
