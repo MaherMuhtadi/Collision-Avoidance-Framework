@@ -5,11 +5,10 @@ import time
 import numpy as np
 import pickle
 import signal
-import pygame
-from pygame.locals import K_ESCAPE
 import subprocess
 import psutil
 from dotenv import load_dotenv
+from EgoController import EgoController
 
 load_dotenv()
 
@@ -47,8 +46,6 @@ def main():
     ego = camera = lidar = imu_sensor = collision_sensor = None
     npc_vehicles = []
     frame_data = {} # Dictionary to store frame data for logging
-    collision_count = 0
-    last_collision_actor = "None" # Variable to store the most recent actor collided with
 
     # Connect to the CARLA server
     print("Connecting to CARLA server...")
@@ -86,6 +83,7 @@ def main():
     spawn_point = random.choice(spawn_points)
     vehicle_bp = blueprint_library.find('vehicle.tesla.model3')
     ego = world.spawn_actor(vehicle_bp, spawn_point)
+    ec = EgoController()
         
     # Attach RGB camera sensor to vehicle
     camera_bp = blueprint_library.find('sensor.camera.rgb')
@@ -133,11 +131,6 @@ def main():
             'acc': [imu.accelerometer.x, imu.accelerometer.y, imu.accelerometer.z],
             'gyro': [imu.gyroscope.x, imu.gyroscope.y, imu.gyroscope.z]
         }
-
-    def log_collision(event):
-        nonlocal collision_count, last_collision_actor
-        collision_count += 1
-        last_collision_actor = event.other_actor.type_id
     
     # Log expert actions
     def log_actions():
@@ -153,7 +146,7 @@ def main():
     camera.listen(log_image)
     lidar.listen(log_lidar)
     imu_sensor.listen(log_imu)
-    collision_sensor.listen(log_collision)
+    collision_sensor.listen(ec.log_collision)
 
     # Spawn 80 NPC vehicles
     random.shuffle(spawn_points)
@@ -165,53 +158,6 @@ def main():
             traffic_manager.ignore_lights_percentage(npc, 100.0)
             traffic_manager.ignore_signs_percentage(npc, 100.0)
             npc_vehicles.append(npc)
-    
-    # Initialize pygame window for status overlay
-    pygame.init()
-    pygame.font.init()
-    font = pygame.font.SysFont("Arial", 12)
-    status_display = pygame.display.set_mode((250, 100))
-    pygame.display.set_caption("Ego Vehicle Status")
-
-    def handle_vehicle_control(ego):
-        keys = pygame.key.get_pressed()
-        control = carla.VehicleControl()
-
-        if keys[pygame.K_UP]:
-            control.throttle = 1.0
-            control.reverse = False
-        elif keys[pygame.K_DOWN]:
-            control.throttle = 1.0
-            control.reverse = True
-        else:
-            control.throttle = 0.0
-            control.reverse = False
-
-        control.steer = -0.1 if keys[pygame.K_LEFT] else 0.1 if keys[pygame.K_RIGHT] else 0.0
-        control.brake = 1.0 if keys[pygame.K_SPACE] else 0.0
-        control.hand_brake = False
-        ego.apply_control(control)
-
-    def update_status():
-        velocity = ego.get_velocity()
-        speed_kmh = 3.6 * np.sqrt(velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2)
-        speed_limit = ego.get_speed_limit()
-        hours, remainder = divmod(elapsed_time, 3600)
-        minutes, seconds = divmod(remainder, 60)
-        
-        status_display.fill((30, 30, 30))
-        speed_text = font.render(f"Speed: {speed_kmh:.1f} km/h", True, (255, 255, 255))
-        limit_text = font.render(f"Speed Limit: {speed_limit:.1f} km/h", True, (200, 200, 0))
-        collision_counter_text = font.render(f"Collisions: {collision_count}", True, (255, 100, 100))
-        collision_actor_text = font.render(f"Last Collision: {last_collision_actor}", True, (255, 150, 0))
-        runtime_text = font.render(f"Run Time: {hours:02}:{minutes:02}:{seconds:02}", True, (0, 200, 255))
-        
-        status_display.blit(speed_text, (10, 10))
-        status_display.blit(limit_text, (10, 27))
-        status_display.blit(collision_counter_text, (10, 44))
-        status_display.blit(collision_actor_text, (10, 61))
-        status_display.blit(runtime_text, (10, 78))
-        pygame.display.flip()
 
     start_sim_time = time.time() # Start time of simulation
 
@@ -223,15 +169,14 @@ def main():
                 print("Simulation time limit reached (1 hour). Stopping simulation...")
                 running = False
             world.tick()
-            handle_vehicle_control(ego)
+            ec.handle_vehicle_control(ego)
             log_actions()
             update_spectator()
-            update_status()
+            ec.update_status(ego, elapsed_time)
 
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == K_ESCAPE):
-                    print("Stopping simulation...")
-                    running = False
+            if ec.check_exit_event():
+                print("Stopping simulation...")
+                running = False
 
         except RuntimeError as e:
             print("Runtime error:", e)
