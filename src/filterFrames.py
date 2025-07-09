@@ -6,9 +6,9 @@ from PIL import Image
 from concurrent.futures import ThreadPoolExecutor
 
 # Create output directories if they don't exist
-camera_dir = '../Camera'
-lidar_dir = '../Lidar'
-logs_dir = '../Logs'
+camera_dir = 'Camera'
+lidar_dir = 'Lidar'
+logs_dir = 'Logs'
 os.makedirs(camera_dir, exist_ok=True)
 os.makedirs(lidar_dir, exist_ok=True)
 os.makedirs(logs_dir, exist_ok=True)
