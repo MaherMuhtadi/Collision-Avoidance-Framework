@@ -6,6 +6,7 @@ import numpy as np
 import pickle
 import signal
 import pygame
+from pygame.locals import K_ESCAPE
 import subprocess
 import psutil
 from dotenv import load_dotenv
@@ -85,15 +86,7 @@ def main():
     spawn_point = random.choice(spawn_points)
     vehicle_bp = blueprint_library.find('vehicle.tesla.model3')
     ego = world.spawn_actor(vehicle_bp, spawn_point)
-    ego.set_autopilot(True, traffic_manager.get_port())
-    traffic_manager.vehicle_percentage_speed_difference(ego, -30.0)  # Makes ego 30% faster
-    traffic_manager.distance_to_leading_vehicle(ego, 1.0)
-    traffic_manager.auto_lane_change(ego, True)
-    traffic_manager.random_left_lanechange_percentage(ego, 100)
-    traffic_manager.random_right_lanechange_percentage(ego, 100)
-    traffic_manager.ignore_lights_percentage(ego, 100.0) # Ignore traffic lights to reduce uneventful frames
-    traffic_manager.ignore_signs_percentage(ego, 100.0) # Ignore stop signs to reduce uneventful frames
-
+        
     # Attach RGB camera sensor to vehicle
     camera_bp = blueprint_library.find('sensor.camera.rgb')
     camera_bp.set_attribute('sensor_tick', str(1.0 / 30.0))
@@ -180,6 +173,25 @@ def main():
     status_display = pygame.display.set_mode((250, 100))
     pygame.display.set_caption("Ego Vehicle Status")
 
+    def handle_vehicle_control(ego):
+        keys = pygame.key.get_pressed()
+        control = carla.VehicleControl()
+
+        if keys[pygame.K_UP]:
+            control.throttle = 1.0
+            control.reverse = False
+        elif keys[pygame.K_DOWN]:
+            control.throttle = 1.0
+            control.reverse = True
+        else:
+            control.throttle = 0.0
+            control.reverse = False
+
+        control.steer = -0.1 if keys[pygame.K_LEFT] else 0.1 if keys[pygame.K_RIGHT] else 0.0
+        control.brake = 1.0 if keys[pygame.K_SPACE] else 0.0
+        control.hand_brake = False
+        ego.apply_control(control)
+
     def update_status():
         velocity = ego.get_velocity()
         speed_kmh = 3.6 * np.sqrt(velocity.x ** 2 + velocity.y ** 2 + velocity.z ** 2)
@@ -211,13 +223,14 @@ def main():
                 print("Simulation time limit reached (1 hour). Stopping simulation...")
                 running = False
             world.tick()
+            handle_vehicle_control(ego)
             log_actions()
             update_spectator()
             update_status()
 
             for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    print("Status window closed. Stopping simulation...")
+                if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == K_ESCAPE):
+                    print("Stopping simulation...")
                     running = False
 
         except RuntimeError as e:
