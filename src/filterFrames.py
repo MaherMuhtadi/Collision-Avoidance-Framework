@@ -6,9 +6,12 @@ from PIL import Image
 from concurrent.futures import ThreadPoolExecutor
 
 # Create output directories if they don't exist
-os.makedirs('Camera', exist_ok=True)
-os.makedirs('Lidar', exist_ok=True)
-os.makedirs('Logs', exist_ok=True)
+camera_dir = '../Camera'
+lidar_dir = '../Lidar'
+logs_dir = '../Logs'
+os.makedirs(camera_dir, exist_ok=True)
+os.makedirs(lidar_dir, exist_ok=True)
+os.makedirs(logs_dir, exist_ok=True)
 
 REQUIRED_MODALITIES = ["camera_data", "lidar_data", "imu", "actions"]
 
@@ -17,7 +20,7 @@ def save_single_frame(frame_id, data):
 
     if not missing:
         # Save RGB camera image
-        path_img = f'Camera/camera_{frame_id:06d}.png'
+        path_img = f'{camera_dir}/camera_{frame_id:06d}.png'
         bgr_array = data['camera_data']
         rgb_array = bgr_array[:, :, ::-1]  # BGR to RGB
         img = Image.fromarray(rgb_array)
@@ -26,7 +29,7 @@ def save_single_frame(frame_id, data):
         del data['camera_data']
 
         # Save LiDAR data
-        path_lidar = f'Lidar/lidar_{frame_id:06d}.npy'
+        path_lidar = f'{lidar_dir}/lidar_{frame_id:06d}.npy'
         np.save(path_lidar, data['lidar_data'])
         data['lidar_path'] = path_lidar
         del data['lidar_data']
@@ -35,7 +38,7 @@ def save_single_frame(frame_id, data):
     else:
         return frame_id, None, missing
 
-def filter_raw_frames(input_file='Logs/raw_data.pkl'):
+def filter_raw_frames(input_file=f'{logs_dir}/raw_data.pkl'):
     with open(input_file, 'rb') as f:
         frame_data = pickle.load(f)
 
@@ -56,12 +59,12 @@ def filter_raw_frames(input_file='Logs/raw_data.pkl'):
             dropped_frames[frame_id] = missing
 
     # Save valid frames
-    with open('Logs/filtered_data.json', 'w') as f:
+    with open(f'{logs_dir}/filtered_data.json', 'w') as f:
         json.dump(valid_frame_data, f, indent=2)
     print("Filtered frame data saved.")
 
     # Save summary
-    with open('Logs/frame_summary.json', 'w') as f:
+    with open(f'{logs_dir}/frame_summary.json', 'w') as f:
         json.dump({
             "total_frames_played": len(total_frames_seen),
             "stored_frames": len(valid_frame_data),
