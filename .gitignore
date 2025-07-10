@@ -13,7 +13,7 @@ wheels/
 # Data logs
 Camera
 Lidar
-Logs
+Data
 
 # Automation script for setting up GPU server
 setup.sh
