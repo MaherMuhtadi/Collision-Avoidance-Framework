@@ -27,6 +27,7 @@ class EgoController:
             self.ego.set_autopilot(True, self.tm.get_port())
             self.tm.ignore_lights_percentage(self.ego, 100.0)
             self.tm.ignore_signs_percentage(self.ego, 100.0)
+            self.tm.vehicle_percentage_speed_difference(self.ego, -30) # Makes ego 30% faster
 
         self.last_collision_actor = "None"
         self.collision_count = 0

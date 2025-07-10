@@ -84,7 +84,7 @@ def main():
     spawn_point = random.choice(spawn_points)
     vehicle_bp = blueprint_library.find('vehicle.tesla.model3')
     ego = world.spawn_actor(vehicle_bp, spawn_point)
-    ec = EgoController(ego=ego, traffic_manager=traffic_manager)
+    ec = EgoController(ego=ego, traffic_manager=None)
         
     # Attach RGB camera sensor to vehicle
     camera_bp = blueprint_library.find('sensor.camera.rgb')
