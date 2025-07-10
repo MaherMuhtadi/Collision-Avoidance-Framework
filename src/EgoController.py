@@ -31,7 +31,7 @@ class EgoController:
 
         self.last_collision_actor = "None"
         self.collision_count = 0
-        self.current_steer = 0.0  # For smooth manual steering
+        self.current_steer = 0.0
         self.steer_rate = 0.05
 
     def update_status(self, elapsed_time):
@@ -130,10 +130,19 @@ class EgoController:
         max_steer, min_steer, max_speed = 0.3, 0.05, 25.0  # 25 m/s ≈ 90 km/h
         sensitivity = max(min_steer, max_steer * (1 - speed / max_speed))
         target = 0.0
-        if keys[pygame.K_LEFT] ^ keys[pygame.K_RIGHT]:
-            target = -sensitivity if keys[pygame.K_LEFT] else sensitivity
-        delta = np.clip(target - self.current_steer, -self.steer_rate, self.steer_rate)
+        if keys[pygame.K_LEFT] and not keys[pygame.K_RIGHT]:
+            target = -sensitivity
+        elif keys[pygame.K_RIGHT] and not keys[pygame.K_LEFT]:
+            target = sensitivity
+        else:
+            target = 0.0
+        if target == 0.0:
+            delta_limit = self.steer_rate * 2  # faster return to center
+        else:
+            delta_limit = self.steer_rate      # normal steering rate
+        delta = np.clip(target - self.current_steer, -delta_limit, delta_limit)
         self.current_steer += delta
+        self.current_steer = np.clip(self.current_steer, -1.0, 1.0)
         control.steer = self.current_steer
 
         self.ego.apply_control(control)
