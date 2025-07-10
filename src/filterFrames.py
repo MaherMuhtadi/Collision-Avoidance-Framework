@@ -8,10 +8,10 @@ from concurrent.futures import ThreadPoolExecutor
 # Create output directories if they don't exist
 camera_dir = 'Camera'
 lidar_dir = 'Lidar'
-logs_dir = 'Logs'
+data_dir = 'Data'
 os.makedirs(camera_dir, exist_ok=True)
 os.makedirs(lidar_dir, exist_ok=True)
-os.makedirs(logs_dir, exist_ok=True)
+os.makedirs(data_dir, exist_ok=True)
 
 REQUIRED_MODALITIES = ["camera_data", "lidar_data", "imu", "actions"]
 
@@ -38,7 +38,7 @@ def save_single_frame(frame_id, data):
     else:
         return frame_id, None, missing
 
-def filter_raw_frames(input_file=f'{logs_dir}/raw_data.pkl'):
+def filter_raw_frames(input_file=f'{data_dir}/raw_data.pkl'):
     with open(input_file, 'rb') as f:
         frame_data = pickle.load(f)
 
@@ -59,12 +59,12 @@ def filter_raw_frames(input_file=f'{logs_dir}/raw_data.pkl'):
             dropped_frames[frame_id] = missing
 
     # Save valid frames
-    with open(f'{logs_dir}/filtered_data.json', 'w') as f:
+    with open(f'{data_dir}/filtered_data.json', 'w') as f:
         json.dump(valid_frame_data, f, indent=2)
     print("Filtered frame data saved.")
 
     # Save summary
-    with open(f'{logs_dir}/frame_summary.json', 'w') as f:
+    with open(f'{data_dir}/frame_summary.json', 'w') as f:
         json.dump({
             "total_frames_played": len(total_frames_seen),
             "stored_frames": len(valid_frame_data),

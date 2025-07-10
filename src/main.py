@@ -188,8 +188,8 @@ def main():
             if sensor is not None:
                 sensor.stop()
         time.sleep(1.0)
-        os.makedirs('Logs', exist_ok=True)
-        with open('Logs/raw_data.pkl', 'wb') as f:
+        os.makedirs('Data', exist_ok=True)
+        with open('Data/raw_data.pkl', 'wb') as f:
             pickle.dump(frame_data, f)
         print("Raw data saved for processing.")
     except Exception as e:

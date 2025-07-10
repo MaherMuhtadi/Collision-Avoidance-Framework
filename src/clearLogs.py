@@ -2,7 +2,7 @@ import os
 import shutil
 
 # Directories to reset
-directories = ['Camera', 'Lidar', 'Logs']
+directories = ['Camera', 'Lidar', 'Data']
 
 for directory in directories:
     # Remove the directory if it exists
