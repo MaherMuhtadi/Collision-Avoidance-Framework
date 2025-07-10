@@ -1,4 +1,4 @@
-import pickle
+import shelve
 import numpy as np
 import os
 import json
@@ -38,16 +38,15 @@ def save_single_frame(frame_id, data):
     else:
         return frame_id, None, missing
 
-def filter_raw_frames(input_file=f'{data_dir}/raw_data.pkl'):
-    with open(input_file, 'rb') as f:
-        frame_data = pickle.load(f)
+def filter_raw_frames(input_file='Data/raw_data'):
+    frame_data = shelve.open(input_file)
 
     valid_frame_data = {}
     dropped_frames = {}
     total_frames_seen = set()
 
     print("Filtering frame data...")
-    items = list(frame_data.items())
+    items = [(int(k), v) for k, v in frame_data.items()] # Convert keys to integers for sorting/ordering
     with ThreadPoolExecutor(max_workers=8) as executor:
         results = list(executor.map(lambda item: save_single_frame(*item), items))
 
@@ -72,6 +71,8 @@ def filter_raw_frames(input_file=f'{data_dir}/raw_data.pkl'):
             "missing_data": {str(fid): mods for fid, mods in sorted(dropped_frames.items())}
         }, f, indent=2)
     print("Frame drop summary saved.")
+
+    frame_data.close()
 
 if __name__ == "__main__":
     filter_raw_frames()

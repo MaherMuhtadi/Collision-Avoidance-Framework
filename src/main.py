@@ -3,7 +3,7 @@ import carla
 import random
 import time
 import numpy as np
-import pickle
+import shelve
 import signal
 import subprocess
 import psutil
@@ -45,7 +45,8 @@ def main():
     global running
     ego = camera = lidar = imu_sensor = collision_sensor = None
     npc_vehicles = []
-    frame_data = {} # Dictionary to store frame data for logging
+    os.makedirs('Data', exist_ok=True)
+    frame_data = shelve.open('Data/raw_data', writeback=True)
 
     # Connect to the CARLA server
     print("Connecting to CARLA server...")
@@ -120,14 +121,14 @@ def main():
     # Callback functions to process and store sensor data
     def log_image(image):
         array = np.frombuffer(image.raw_data, dtype=np.uint8).reshape((image.height, image.width, 4)).copy()
-        frame_data.setdefault(image.frame, {})['camera_data'] = array[:, :, :3]
+        frame_data.setdefault(str(image.frame), {})['camera_data'] = array[:, :, :3]
 
     def log_lidar(point_cloud):
         data = np.frombuffer(point_cloud.raw_data, dtype=np.float32).reshape(-1, 4).copy()
-        frame_data.setdefault(point_cloud.frame, {})['lidar_data'] = data
+        frame_data.setdefault(str(point_cloud.frame), {})['lidar_data'] = data
 
     def log_imu(imu):
-        frame_data.setdefault(imu.frame, {})['imu'] = {
+        frame_data.setdefault(str(imu.frame), {})['imu'] = {
             'acc': [imu.accelerometer.x, imu.accelerometer.y, imu.accelerometer.z],
             'gyro': [imu.gyroscope.x, imu.gyroscope.y, imu.gyroscope.z]
         }
@@ -136,7 +137,7 @@ def main():
     def log_actions():
         control = ego.get_control()
         frame_id = ego.get_world().get_snapshot().frame
-        frame_data.setdefault(frame_id, {})['actions'] = {
+        frame_data.setdefault(str(frame_id), {})['actions'] = {
             'steer': float(control.steer),
             'throttle': float(control.throttle),
             'brake': float(control.brake)
@@ -173,6 +174,7 @@ def main():
             log_actions()
             update_spectator()
             ec.update_status(ego, elapsed_time)
+            frame_data.sync()
 
             if ec.check_exit_event():
                 print("Stopping simulation...")
@@ -188,10 +190,7 @@ def main():
             if sensor is not None:
                 sensor.stop()
         time.sleep(1.0)
-        os.makedirs('Data', exist_ok=True)
-        with open('Data/raw_data.pkl', 'wb') as f:
-            pickle.dump(frame_data, f)
-        print("Raw data saved for processing.")
+        frame_data.close()
     except Exception as e:
         print("Error during cleanup:", e)
 
