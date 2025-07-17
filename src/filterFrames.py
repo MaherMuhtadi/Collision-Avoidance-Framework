@@ -13,7 +13,7 @@ os.makedirs(camera_dir, exist_ok=True)
 os.makedirs(lidar_dir, exist_ok=True)
 os.makedirs(data_dir, exist_ok=True)
 
-REQUIRED_MODALITIES = ["camera_data", "lidar_data", "imu", "collision"]
+REQUIRED_MODALITIES = ["camera_data", "lidar_data", "imu"]
 
 def save_single_frame(frame_id, data):
     missing = [mod for mod in REQUIRED_MODALITIES if mod not in data]
@@ -48,7 +48,7 @@ def filter_raw_frames(input_file='Data/raw_data'):
     print("Filtering frame data...")
     items = [(int(k), v) for k, v in frame_data.items()] # Convert keys to integers for sorting/ordering
     with ThreadPoolExecutor(max_workers=8) as executor:
-        results = list(executor.map(lambda item: save_single_frame(*item), items))
+        results = sorted(list(executor.map(lambda item: save_single_frame(*item), items)))
 
     for frame_id, data, missing in results:
         total_frames_seen.add(frame_id)
