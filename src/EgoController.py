@@ -67,7 +67,7 @@ class EgoController:
         self.display.blit(self.font.render(f"Run Time: {hours:02}:{minutes:02}:{seconds:02}", True, (144, 238, 144)), (10, 95))
         pygame.display.flip()
 
-    def log_collision(self, event):
+    def track_collision(self, event):
         """Callback for collision events."""
         self.collision_count += 1
         self.last_collision_actor = event.other_actor.type_id

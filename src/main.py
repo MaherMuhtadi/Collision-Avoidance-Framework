@@ -133,21 +133,25 @@ def main():
             'gyro': [imu.gyroscope.x, imu.gyroscope.y, imu.gyroscope.z]
         }
     
-    # Log expert actions
-    def log_actions():
-        control = ego.get_control()
-        frame_id = ego.get_world().get_snapshot().frame
-        frame_data.setdefault(str(frame_id), {})['actions'] = {
-            'steer': float(control.steer),
-            'throttle': float(control.throttle),
-            'brake': float(control.brake)
-        }
+    def log_collision(event):
+        ec.track_collision(event)
+        frame_data.setdefault(str(event.frame), {})['collision'] = 1
+    
+    # # Log expert actions
+    # def log_actions():
+    #     control = ego.get_control()
+    #     frame_id = ego.get_world().get_snapshot().frame
+    #     frame_data.setdefault(str(frame_id), {})['actions'] = {
+    #         'steer': float(control.steer),
+    #         'throttle': float(control.throttle),
+    #         'brake': float(control.brake)
+    #     }
 
     # Register callbacks with sensors
     camera.listen(log_image)
     lidar.listen(log_lidar)
     imu_sensor.listen(log_imu)
-    collision_sensor.listen(ec.log_collision)
+    collision_sensor.listen(log_collision)
 
     # Spawn 80 NPC vehicles
     random.shuffle(spawn_points)
@@ -171,7 +175,7 @@ def main():
                 running = False
             world.tick()
             ec.handle_vehicle_control()
-            log_actions()
+            # log_actions()
             update_spectator()
             ec.update_status(elapsed_time)
             frame_data.sync()
