@@ -134,8 +134,11 @@ def main():
         }
     
     def log_collision(event):
+        global running
         ec.track_collision(event)
         frame_data.setdefault(str(event.frame), {})['collision'] = 1
+        print(f"Collision detected at frame {event.frame}. Stopping simulation...")
+        running = False
     
     # # Log expert actions
     # def log_actions():
