@@ -17,8 +17,10 @@ os.makedirs(data_dir, exist_ok=True)
 
 REQUIRED_MODALITIES = ["camera_data", "lidar_data", "imu"]
 
-def label_collision_window(frame_data, collision_frame, window=WINDOW, fps=FPS):
+def label(frame_data, collision_frame, window=WINDOW, fps=FPS):
     if collision_frame is None:
+        for fid, data in frame_data.items():
+            data["collision"] = 0
         return
     window_frames = min(int(window*fps), len(frame_data)-1)
     for fid, data in frame_data.items():
@@ -74,7 +76,7 @@ def extract_data(input_file='Data/raw_data'):
             dropped_frames[frame_id] = missing
     
     print("Adding labels...")
-    label_collision_window(valid_frame_data, final_frame) # label the 3-second window around collision
+    label(valid_frame_data, final_frame) # label the 3-second window around collision
 
     # Save valid frames
     with open(f'{data_dir}/filtered_data.json', 'w') as f:
