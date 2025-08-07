@@ -7,17 +7,18 @@ import shelve
 import signal
 import subprocess
 import psutil
-from collections import deque
+import bisect
 from dotenv import load_dotenv
 from EgoController import EgoController
 
 load_dotenv()
 
 fps = 30
-window = 20 # Data collection limited to last 20 sec
+window = 20 # Data collection window limited to last 20 sec
+frame_buffer = [] # Buffers the allowed window of frames
+seen_frames = []
 process = None # Global variable to hold the CARLA server process
 running = True # Global flag to control the simulation loop
-frame_buffer = deque(maxlen= window * fps)
 
 # Signal handler to gracefully stop the simulation
 def signal_handler(sig, frame):
@@ -53,12 +54,11 @@ def main():
     frame_data = shelve.open('Data/raw_data', writeback=True)
 
     def slide_buffer(frame_id):
-        if frame_id not in frame_buffer:
-            if len(frame_buffer) == frame_buffer.maxlen:
-                old_id = frame_buffer[0]
-                if old_id in frame_data:
-                    del frame_data[old_id]
-            frame_buffer.append(frame_id)
+        if len(frame_buffer) == window*fps:
+            old_id = str(frame_buffer.pop(0))
+            if old_id in frame_data:
+                del frame_data[old_id]
+        bisect.insort(frame_buffer, int(frame_id))
 
     # Connect to the CARLA server
     print("Connecting to CARLA server...")
@@ -134,37 +134,40 @@ def main():
     def log_image(image):
         array = np.frombuffer(image.raw_data, dtype=np.uint8).reshape((image.height, image.width, 4)).copy()
         frame_data.setdefault(str(image.frame), {})['camera_data'] = array[:, :, :3]
-        slide_buffer(str(image.frame))
+        if str(image.frame) not in seen_frames:
+            seen_frames.append(str(image.frame))
+            slide_buffer(str(image.frame))
 
     def log_lidar(point_cloud):
         data = np.frombuffer(point_cloud.raw_data, dtype=np.float32).reshape(-1, 4).copy()
         frame_data.setdefault(str(point_cloud.frame), {})['lidar_data'] = data
-        slide_buffer(str(point_cloud.frame))
+        if str(point_cloud.frame) not in seen_frames:
+            seen_frames.append(str(point_cloud.frame))
+            slide_buffer(str(point_cloud.frame))
 
     def log_imu(imu):
         frame_data.setdefault(str(imu.frame), {})['imu'] = {
             'acc': [imu.accelerometer.x, imu.accelerometer.y, imu.accelerometer.z],
             'gyro': [imu.gyroscope.x, imu.gyroscope.y, imu.gyroscope.z]
         }
-        slide_buffer(str(imu.frame))
+        if str(imu.frame) not in seen_frames:
+            seen_frames.append(str(imu.frame))
+            slide_buffer(str(imu.frame))
     
     def log_collision(event):
         global running
         ec.track_collision(event)
         frame_data.setdefault(str(event.frame), {})['collision'] = 1
-        slide_buffer(str(event.frame))
+        if str(event.frame) not in seen_frames:
+            seen_frames.append(str(event.frame))
+            slide_buffer(str(event.frame))
         print(f"Collision detected at frame {event.frame}. Stopping simulation...")
         running = False
     
-    # # Log expert actions
-    # def log_actions():
+    # def log_steering():
     #     control = ego.get_control()
     #     frame_id = ego.get_world().get_snapshot().frame
-    #     frame_data.setdefault(str(frame_id), {})['actions'] = {
-    #         'steer': float(control.steer),
-    #         'throttle': float(control.throttle),
-    #         'brake': float(control.brake)
-    #     }
+    #     frame_data.setdefault(str(frame_id), {})['steer'] = float(control.steer)
 
     # Register callbacks with sensors
     camera.listen(log_image)
