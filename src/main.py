@@ -7,13 +7,17 @@ import shelve
 import signal
 import subprocess
 import psutil
+from collections import deque
 from dotenv import load_dotenv
 from EgoController import EgoController
 
 load_dotenv()
 
-process = None  # Global variable to hold the CARLA server process
+fps = 30
+window = 20 # Data collection limited to last 20 sec
+process = None # Global variable to hold the CARLA server process
 running = True # Global flag to control the simulation loop
+frame_buffer = deque(maxlen= window * fps)
 
 # Signal handler to gracefully stop the simulation
 def signal_handler(sig, frame):
@@ -48,6 +52,14 @@ def main():
     os.makedirs('Data', exist_ok=True)
     frame_data = shelve.open('Data/raw_data', writeback=True)
 
+    def slide_buffer(frame_id):
+        if frame_id not in frame_buffer:
+            if len(frame_buffer) == frame_buffer.maxlen:
+                old_id = frame_buffer[0]
+                if old_id in frame_data:
+                    del frame_data[old_id]
+            frame_buffer.append(frame_id)
+
     # Connect to the CARLA server
     print("Connecting to CARLA server...")
     start_time = time.time()
@@ -68,7 +80,7 @@ def main():
     # Set the world to synchronous mode for precise control    
     settings = world.get_settings()
     settings.synchronous_mode = True
-    settings.fixed_delta_seconds = 1.0 / 30.0  # 30 FPS
+    settings.fixed_delta_seconds = 1.0 / fps  # 30 FPS
     world.apply_settings(settings)
 
     blueprint_library = world.get_blueprint_library()
@@ -88,7 +100,7 @@ def main():
         
     # Attach RGB camera sensor to vehicle
     camera_bp = blueprint_library.find('sensor.camera.rgb')
-    camera_bp.set_attribute('sensor_tick', str(1.0 / 30.0))
+    camera_bp.set_attribute('sensor_tick', str(1.0 / fps))
     camera_bp.set_attribute('image_size_x', '800')
     camera_bp.set_attribute('image_size_y', '600')
     camera_bp.set_attribute('fov', '90')
@@ -96,13 +108,13 @@ def main():
 
     # Attach LiDAR sensor to vehicle
     lidar_bp = blueprint_library.find('sensor.lidar.ray_cast')
-    lidar_bp.set_attribute('sensor_tick', str(1.0 / 30.0))
+    lidar_bp.set_attribute('sensor_tick', str(1.0 / fps))
     lidar_bp.set_attribute('range', '50')
     lidar = world.spawn_actor(lidar_bp, carla.Transform(carla.Location(x=0, z=2.5)), attach_to=ego)
 
     # Attach IMU sensor to vehicle
     imu_bp = blueprint_library.find('sensor.other.imu')
-    imu_bp.set_attribute('sensor_tick', str(1.0 / 30.0))
+    imu_bp.set_attribute('sensor_tick', str(1.0 / fps))
     imu_sensor = world.spawn_actor(imu_bp, carla.Transform(), attach_to=ego)
     
     # Attach collision sensor to vehicle
@@ -122,21 +134,25 @@ def main():
     def log_image(image):
         array = np.frombuffer(image.raw_data, dtype=np.uint8).reshape((image.height, image.width, 4)).copy()
         frame_data.setdefault(str(image.frame), {})['camera_data'] = array[:, :, :3]
+        slide_buffer(str(image.frame))
 
     def log_lidar(point_cloud):
         data = np.frombuffer(point_cloud.raw_data, dtype=np.float32).reshape(-1, 4).copy()
         frame_data.setdefault(str(point_cloud.frame), {})['lidar_data'] = data
+        slide_buffer(str(point_cloud.frame))
 
     def log_imu(imu):
         frame_data.setdefault(str(imu.frame), {})['imu'] = {
             'acc': [imu.accelerometer.x, imu.accelerometer.y, imu.accelerometer.z],
             'gyro': [imu.gyroscope.x, imu.gyroscope.y, imu.gyroscope.z]
         }
+        slide_buffer(str(imu.frame))
     
     def log_collision(event):
         global running
         ec.track_collision(event)
         frame_data.setdefault(str(event.frame), {})['collision'] = 1
+        slide_buffer(str(event.frame))
         print(f"Collision detected at frame {event.frame}. Stopping simulation...")
         running = False
     
