@@ -50,7 +50,7 @@ def save_single_frame(frame_id, data):
     else:
         return frame_id, None, missing
 
-def filter_raw_frames(input_file='Data/raw_data'):
+def extract_data(input_file='Data/raw_data'):
     valid_frame_data = {}
     dropped_frames = {}
     total_frames_seen = set()
@@ -73,6 +73,7 @@ def filter_raw_frames(input_file='Data/raw_data'):
         else:
             dropped_frames[frame_id] = missing
     
+    print("Adding labels...")
     label_collision_window(valid_frame_data, final_frame) # label the 3-second window around collision
 
     # Save valid frames
@@ -91,4 +92,4 @@ def filter_raw_frames(input_file='Data/raw_data'):
     print("Frame drop summary saved.")
 
 if __name__ == "__main__":
-    filter_raw_frames()
+    extract_data()
