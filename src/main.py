@@ -46,12 +46,24 @@ def kill_zombie_carla_processes():
             continue
     print("All zombie CARLA processes terminated.")
 
+def next_save_file(base_dir="SensorData", prefix="run_"):
+    os.makedirs(base_dir, exist_ok=True)
+    nums = []
+    for fname in os.listdir(base_dir):
+        base, _ = os.path.splitext(fname)
+        if base.startswith(prefix):
+            s = base[len(prefix):]
+            if s.isdigit():
+                nums.append(int(s))
+    n = max(nums) + 1 if nums else 1
+    return os.path.join(base_dir, f"{prefix}{n}")
+
 def main():
     global running
     ego = camera = lidar = imu_sensor = collision_sensor = None
     npc_vehicles = []
-    os.makedirs('Data', exist_ok=True)
-    frame_data = shelve.open('Data/raw_data', writeback=True)
+    save_file = next_save_file()
+    frame_data = shelve.open(save_file, writeback=True)
 
     def slide_buffer(frame_id):
         if len(frame_buffer) == window*fps:
@@ -192,8 +204,8 @@ def main():
     while running:
         try:
             elapsed_time = int(time.time() - start_sim_time)
-            if elapsed_time >= 3600:
-                print("Simulation time limit reached (1 hour). Stopping simulation...")
+            if elapsed_time >= 1800:
+                print("Simulation time limit reached (30 min). Stopping simulation...")
                 running = False
             world.tick()
             ec.handle_vehicle_control()
@@ -217,6 +229,7 @@ def main():
                 sensor.stop()
         time.sleep(1.0)
         frame_data.close()
+        print(f"Saved sensor readings to {save_file}.*")
     except Exception as e:
         print("Error during cleanup:", e)
 
