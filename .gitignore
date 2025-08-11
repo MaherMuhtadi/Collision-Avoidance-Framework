@@ -10,11 +10,9 @@ wheels/
 .venv
 .env
 
-# Data logs
+# Data collections
 SensorData
-Camera
-Lidar
-Data
+ExtractedData
 
 # Documentation draft
 Documentation.pdf
