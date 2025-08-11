@@ -34,18 +34,13 @@ def discover_shelve_bases(base_dir="SensorData"):
     return bases
 
 def save_single_frame(frame_id, data, camera_dir, lidar_dir):
-    present = {
-        "camera_data": "camera_data" in data,
-        "lidar_data": "lidar_data" in data,
-        "imu": "imu" in data,
-    }
-    missing = [k for k,v in present.items() if not v]
+    missing = [mod for mod in REQUIRED_MODALITIES if mod not in data]
 
-    if not present["imu"]:
+    if "imu" in missing:
         data['imu'] = None
 
     # Camera: save if present, else path None
-    if present["camera_data"]:
+    if "camera_data" not in missing:
         path_img = os.path.join(camera_dir, f"camera_{frame_id:06d}.png")
         bgr = data["camera_data"]
         rgb = bgr[:, :, ::-1]  # BGR -> RGB
@@ -56,19 +51,13 @@ def save_single_frame(frame_id, data, camera_dir, lidar_dir):
         data["camera_path"] = None
 
     # LiDAR: save if present, else path None
-    if present["lidar_data"]:
+    if "lidar_data" not in missing:
         path_lidar = os.path.join(lidar_dir, f"lidar_{frame_id:06d}.npy")
         np.save(path_lidar, data["lidar_data"])
         data["lidar_path"] = path_lidar
         del data["lidar_data"]
     else:
         data["lidar_path"] = None
-
-    data["modalities"] = {
-        "imu": present["imu"],
-        "camera": present["camera_data"],
-        "lidar": present["lidar_data"]
-    }
 
     return frame_id, data, missing
 
