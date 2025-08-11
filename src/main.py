@@ -229,7 +229,7 @@ def main():
                 sensor.stop()
         time.sleep(1.0)
         frame_data.close()
-        print(f"Saved sensor readings to {save_file}.*")
+        print(f"Saved sensor readings to {save_file}.")
     except Exception as e:
         print("Error during cleanup:", e)
 
