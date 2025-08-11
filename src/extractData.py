@@ -34,27 +34,43 @@ def discover_shelve_bases(base_dir="SensorData"):
     return bases
 
 def save_single_frame(frame_id, data, camera_dir, lidar_dir):
-    missing = [mod for mod in REQUIRED_MODALITIES if mod not in data]
+    present = {
+        "camera_data": "camera_data" in data,
+        "lidar_data": "lidar_data" in data,
+        "imu": "imu" in data,
+    }
+    missing = [k for k,v in present.items() if not v]
 
-    if not missing:
-        # Save RGB camera image
-        path_img = os.path.join(camera_dir, f'camera_{frame_id:06d}.png')
-        bgr_array = data['camera_data']
-        rgb_array = bgr_array[:, :, ::-1]  # BGR to RGB
-        img = Image.fromarray(rgb_array)
-        img.save(path_img)
-        data['camera_path'] = path_img
-        del data['camera_data']
+    if not present["imu"]:
+        data['imu'] = None
 
-        # Save LiDAR data
-        path_lidar = os.path.join(lidar_dir, f'lidar_{frame_id:06d}.npy')
-        np.save(path_lidar, data['lidar_data'])
-        data['lidar_path'] = path_lidar
-        del data['lidar_data']
-
-        return frame_id, data, None
+    # Camera: save if present, else path None
+    if present["camera_data"]:
+        path_img = os.path.join(camera_dir, f"camera_{frame_id:06d}.png")
+        bgr = data["camera_data"]
+        rgb = bgr[:, :, ::-1]  # BGR -> RGB
+        Image.fromarray(rgb).save(path_img)
+        data["camera_path"] = path_img
+        del data["camera_data"]
     else:
-        return frame_id, None, missing
+        data["camera_path"] = None
+
+    # LiDAR: save if present, else path None
+    if present["lidar_data"]:
+        path_lidar = os.path.join(lidar_dir, f"lidar_{frame_id:06d}.npy")
+        np.save(path_lidar, data["lidar_data"])
+        data["lidar_path"] = path_lidar
+        del data["lidar_data"]
+    else:
+        data["lidar_path"] = None
+
+    data["modalities"] = {
+        "imu": present["imu"],
+        "camera": present["camera_data"],
+        "lidar": present["lidar_data"]
+    }
+
+    return frame_id, data, missing
 
 def process_single_run(shelve_dir, out_dir):
     run_name = os.path.basename(shelve_dir.rstrip(os.sep))
@@ -64,8 +80,8 @@ def process_single_run(shelve_dir, out_dir):
     os.makedirs(camera_dir, exist_ok=True)
     os.makedirs(lidar_dir,  exist_ok=True)
 
-    valid_frame_data = {}
-    dropped_frames = {}
+    final_frame_data = {}
+    padded_frames = {}
     total_frames_seen = set()
     final_frame = None
 
@@ -80,7 +96,7 @@ def process_single_run(shelve_dir, out_dir):
     except Exception as e:
         print(f"Error: {e}")
 
-    print("Filtering and saving frame data...")
+    print("Padding and saving frame data...")
     with ThreadPoolExecutor(max_workers=8) as executor:
         def _worker(item):
             return save_single_frame(item[0], item[1], camera_dir, lidar_dir)
@@ -88,25 +104,23 @@ def process_single_run(shelve_dir, out_dir):
 
     for frame_id, data, missing in results:
         total_frames_seen.add(frame_id)
-        if data:
-            valid_frame_data[frame_id] = data
-        else:
-            dropped_frames[frame_id] = missing
+        final_frame_data[frame_id] = data
+        if missing:
+            padded_frames[frame_id] = missing
 
     print("Adding labels...")
-    label(valid_frame_data, final_frame)
+    label(final_frame_data, final_frame)
 
     # Save valid frames metadata
     with open(os.path.join(run_dir, 'extracted_data.json'), 'w') as f:
-        json.dump(valid_frame_data, f, indent=2)
+        json.dump(final_frame_data, f, indent=2)
 
     # Save summary
     summary = {
-        "total_frames_played": len(total_frames_seen),
-        "stored_frames": len(valid_frame_data),
-        "dropped_frames": len(dropped_frames),
-        "collision_frame": final_frame,
-        "missing_data": {str(fid): mods for fid, mods in sorted(dropped_frames.items())}
+        "frames_played": len(total_frames_seen),
+        "padded_frames": len(padded_frames),
+        "collision_frame_id": final_frame,
+        "missing_modalities": {str(fid): mods for fid, mods in sorted(padded_frames.items())}
     }
     with open(os.path.join(run_dir, 'frame_summary.json'), 'w') as f:
         json.dump(summary, f, indent=2)
