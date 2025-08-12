@@ -8,6 +8,7 @@ import signal
 import subprocess
 import psutil
 import bisect
+import json
 from dotenv import load_dotenv
 from EgoController import EgoController
 
@@ -17,6 +18,7 @@ fps = 30
 window = 20 # Data collection window limited to last 20 sec
 frame_buffer = [] # Buffers the allowed window of frames
 seen_frames = []
+lidar_settings_path = "lidar_settings.json"
 process = None # Global variable to hold the CARLA server process
 running = True # Global flag to control the simulation loop
 
@@ -57,6 +59,30 @@ def next_save_file(base_dir="SensorData", prefix="run_"):
                 nums.append(int(s))
     n = max(nums) + 1 if nums else 1
     return os.path.join(base_dir, f"{prefix}{n}")
+
+def save_lidar_settings(lidar):
+    try:
+        attrs = lidar.attributes if lidar is not None else {}
+        channels = int(attrs.get('channels'))
+        upper_fov = float(attrs.get('upper_fov'))
+        lower_fov = float(attrs.get('lower_fov'))
+        max_range = float(attrs.get('range'))
+        rot_freq = float(attrs.get('rotation_frequency'))
+        pps = int(attrs.get('points_per_second'))
+
+        kv = {
+            'CHANNELS': str(channels),
+            'ROT_FREQ': str(rot_freq),
+            'PPS': str(pps),
+            'FOV_UP': f"{upper_fov}",
+            'FOV_DOWN': f"{lower_fov}",
+            'MAX_RANGE': f"{max_range}",
+        }
+        with open(lidar_settings_path, 'w') as f:
+            json.dump(kv, f, indent=2)
+
+    except Exception as e:
+        print("Warning:", e)
 
 def main():
     global running
@@ -123,6 +149,7 @@ def main():
     lidar_bp.set_attribute('sensor_tick', str(1.0 / fps))
     lidar_bp.set_attribute('range', '50')
     lidar = world.spawn_actor(lidar_bp, carla.Transform(carla.Location(x=0, z=2.5)), attach_to=ego)
+    save_lidar_settings(lidar)
 
     # Attach IMU sensor to vehicle
     imu_bp = blueprint_library.find('sensor.other.imu')

@@ -8,11 +8,14 @@ IN_DIR = "ExtractedData"
 OUT_DIR = "PreprocessedData"
 JSON_FILE = "extracted_data.json"
 IMG_SIZE = 224
-LIDAR_H = 64
-LIDAR_W = 1024
-FOV_UP = 15.0
-FOV_DOWN = -25.0
-LIDAR_MAX_RANGE = 50.0
+
+with open('lidar_settings.json', 'r') as f:
+    lidar_settings = json.load(f)
+LIDAR_H = int(lidar_settings["CHANNELS"])
+LIDAR_W = max(1, int(int(lidar_settings["PPS"]) / max(float(lidar_settings["ROT_FREQ"]), 1e-6) / max(LIDAR_H, 1)))
+FOV_UP = float(lidar_settings["FOV_UP"])
+FOV_DOWN = float(lidar_settings["FOV_DOWN"])
+LIDAR_MAX_RANGE = float(lidar_settings["MAX_RANGE"])
 
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
