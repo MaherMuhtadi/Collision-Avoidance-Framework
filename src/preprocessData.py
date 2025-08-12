@@ -51,21 +51,28 @@ def preprocess_lidar(pts):
     az = np.arctan2(y, x)
     elev = np.arctan2(z, np.sqrt(x*x + y*y))
     fup, fdown = math.radians(FOV_UP), math.radians(FOV_DOWN)
-    mask = (elev >= fdown) & (elev <= fup) & np.isfinite(r) & (r > 0)
-    if not np.any(mask):
-        return np.zeros((LIDAR_H, LIDAR_W), dtype=np.float32)
-    r, az, elev = r[mask], az[mask], elev[mask]
+    m = (elev >= fdown) & (elev <= fup) & np.isfinite(r) & (r > 0)
+
+    # No points -> all zeros (range and mask)
+    if not np.any(m):
+        return (np.zeros((LIDAR_H, LIDAR_W), dtype=np.float32),
+                np.zeros((LIDAR_H, LIDAR_W), dtype=np.uint8))
+
+    r, az, elev = r[m], az[m], elev[m]
     u = (az + math.pi) / (2.0 * math.pi)
     v = 1.0 - (elev - fdown) / (fup - fdown)
     ui = np.clip((u * LIDAR_W).astype(np.int32), 0, LIDAR_W - 1)
     vi = np.clip((v * LIDAR_H).astype(np.int32), 0, LIDAR_H - 1)
-    out = np.full((LIDAR_H * LIDAR_W,), np.inf, dtype=np.float32)
+
+    flat = np.full((LIDAR_H * LIDAR_W,), np.inf, dtype=np.float32)
     rn = np.clip(r / float(LIDAR_MAX_RANGE), 0.0, 1.0)
     lin = vi * LIDAR_W + ui
-    np.minimum.at(out, lin, rn)
-    out = out.reshape(LIDAR_H, LIDAR_W)
-    out[~np.isfinite(out)] = 0.0
-    return out.astype(np.float32)
+    np.minimum.at(flat, lin, rn)
+
+    rim = flat.reshape(LIDAR_H, LIDAR_W)
+    valid = np.isfinite(rim)
+    rim[~valid] = 0.0
+    return rim.astype(np.float32), valid.astype(np.uint8)
 
 def imu_stack(items):
     out = []
@@ -104,35 +111,53 @@ def process_run(run_dir, global_mean, global_std):
 
     index, labels = {}, {}
     kept, skipped = 0, 0
-    for fid, data in items:
-        cam_p = data.get("camera_path")
-        lidar_p = data.get("lidar_path")
-        imu_d = data.get("imu")
+    miss_rgb = miss_lidar = miss_imu = 0
 
-        if not (cam_p and lidar_p and imu_d):
-            skipped += 1
-            continue
+    for fid, data in items:
+        cam_p   = data.get("camera_path")
+        lidar_p = data.get("lidar_path")
+        imu_d   = data.get("imu")
 
         rec = {}
+        # 1 = present, 0 = padded
+        m_rgb   = 1 if cam_p   else 0
+        m_lidar = 1 if lidar_p else 0
+        m_imu   = 1 if imu_d   else 0
+
         try:
-            if cam_p:
+            if m_rgb:
                 rgb = preprocess_rgb(cam_p)
-                rp = os.path.join(rgb_dir, f"rgb_{fid:06d}.npy"); np.save(rp, rgb); rec["rgb"] = rp
-            if lidar_p:
-                rim = preprocess_lidar(np.load(lidar_p))
-                lp = os.path.join(lidar_dir, f"lidar_{fid:06d}.npy"); np.save(lp, rim); rec["lidar_range"] = lp
-            if imu_d:
+            else:
+                rgb = np.zeros((3, IMG_SIZE, IMG_SIZE), dtype=np.float32); miss_rgb += 1
+            rp = os.path.join(rgb_dir, f"rgb_{fid:06d}.npy"); np.save(rp, rgb); rec["rgb"] = rp
+
+            if m_lidar:
+                rim, vmask = preprocess_lidar(np.load(lidar_p))
+            else:
+                rim, vmask = (np.zeros((LIDAR_H, LIDAR_W), dtype=np.float32),
+                              np.zeros((LIDAR_H, LIDAR_W), dtype=np.uint8)); miss_lidar += 1
+            lp  = os.path.join(lidar_dir, f"lidar_{fid:06d}.npy");       np.save(lp,  rim);   rec["lidar_range"] = lp
+            lvp = os.path.join(lidar_dir, f"lidar_valid_{fid:06d}.npy"); np.save(lvp, vmask); rec["lidar_valid"] = lvp
+
+            if m_imu:
                 iv = imu_norm(imu_d, global_mean, global_std)
-                ip = os.path.join(imu_dir, f"imu_{fid:06d}.npy"); np.save(ip, iv); rec["imu_norm"] = ip
+            else:
+                iv = np.zeros((6,), dtype=np.float32); miss_imu += 1
+            ip = os.path.join(imu_dir, f"imu_{fid:06d}.npy"); np.save(ip, iv); rec["imu"] = ip
+
         except Exception:
             skipped += 1
             continue
+
+        # Frame-level presence mask the model can read
+        rec["modality_mask"] = {"rgb": m_rgb, "lidar": m_lidar, "imu": m_imu}
 
         rec["label"] = int(data.get("collision", 0))
         index[str(fid)] = rec
         labels[str(fid)] = rec["label"]
         kept += 1
 
+    # When writing the summary, include missing counts
     with open(os.path.join(out_run, "preprocessed_data.json"), "w") as f:
         json.dump(index, f, indent=2)
     with open(os.path.join(out_run, "summary.json"), "w") as f:
@@ -140,6 +165,7 @@ def process_run(run_dir, global_mean, global_std):
             "frames_seen": len(items),
             "frames_processed": kept,
             "frames_skipped": skipped,
+            "missing_modalities_counts": {"rgb": miss_rgb, "lidar": miss_lidar, "imu": miss_imu}
         }, f, indent=2)
 
     print(f"'{run_name}' processed and saved to '{out_run}'")
