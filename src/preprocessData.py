@@ -13,7 +13,6 @@ LIDAR_W = 1024
 FOV_UP = 15.0
 FOV_DOWN = -25.0
 LIDAR_MAX_RANGE = 50.0
-REQUIRE_ALL_MODALITIES = True
 
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
@@ -107,7 +106,7 @@ def process_run(run_dir, global_mean, global_std):
         lidar_p = data.get("lidar_path")
         imu_d = data.get("imu")
 
-        if REQUIRE_ALL_MODALITIES and not (cam_p and lidar_p and imu_d):
+        if not (cam_p and lidar_p and imu_d):
             skipped += 1
             continue
 
