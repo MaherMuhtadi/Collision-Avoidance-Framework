@@ -111,7 +111,7 @@ def process_single_run(shelve_dir, out_dir):
         "collision_frame_id": final_frame,
         "missing_modalities": {str(fid): mods for fid, mods in sorted(padded_frames.items())}
     }
-    with open(os.path.join(run_dir, 'frame_summary.json'), 'w') as f:
+    with open(os.path.join(run_dir, 'summary.json'), 'w') as f:
         json.dump(summary, f, indent=2)
     
     print(f"Saved data to '{out_dir}'.")

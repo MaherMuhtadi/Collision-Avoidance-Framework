@@ -89,9 +89,8 @@ def imu_norm(imu, mean, std):
     v = np.array(list(acc)+list(gyro), dtype=np.float32)
     return ((v - mean) / std).astype(np.float32)
 
-def process_run(run_dir):
+def process_run(run_dir, global_mean, global_std):
     items = load_meta(run_dir)
-    mean, std = imu_stats(imu_stack(items))
     run_name = os.path.basename(run_dir.rstrip(os.sep))
     out_run = os.path.join(OUT_DIR, run_name)
     rgb_dir = os.path.join(out_run, "Camera")
@@ -100,8 +99,6 @@ def process_run(run_dir):
     os.makedirs(rgb_dir, exist_ok=True)
     os.makedirs(lidar_dir, exist_ok=True)
     os.makedirs(imu_dir, exist_ok=True)
-    with open(os.path.join(out_run, "imu_stats.json"), "w") as f:
-        json.dump({"mean": mean.tolist(), "std": std.tolist()}, f, indent=2)
 
     index, labels = {}, {}
     kept, skipped = 0, 0
@@ -123,7 +120,7 @@ def process_run(run_dir):
                 rim = preprocess_lidar(np.load(lidar_p))
                 lp = os.path.join(lidar_dir, f"lidar_{fid:06d}.npy"); np.save(lp, rim); rec["lidar_range"] = lp
             if imu_d:
-                iv = imu_norm(imu_d, mean, std)
+                iv = imu_norm(imu_d, global_mean, global_std)
                 ip = os.path.join(imu_dir, f"imu_{fid:06d}.npy"); np.save(ip, iv); rec["imu_norm"] = ip
         except Exception:
             skipped += 1
@@ -136,7 +133,7 @@ def process_run(run_dir):
 
     with open(os.path.join(out_run, "preprocessed_data.json"), "w") as f:
         json.dump(index, f, indent=2)
-    with open(os.path.join(out_run, "data_summary.json"), "w") as f:
+    with open(os.path.join(out_run, "summary.json"), "w") as f:
         json.dump({
             "frames_seen": len(items),
             "frames_processed": kept,
@@ -145,13 +142,42 @@ def process_run(run_dir):
 
     print(f"'{run_name}' processed and saved to '{out_run}'")
 
+def compute_global_imu_stats(run_dirs):
+    # Numerically stable running mean/std (Welford) across all frames
+    count = 0
+    mean = np.zeros(6, dtype=np.float64)
+    M2   = np.zeros(6, dtype=np.float64)
+    for rd in run_dirs:
+        items = load_meta(rd)
+        m = imu_stack(items)  # [N,6]
+        if m.size == 0: 
+            continue
+        for v in m:
+            count += 1
+            delta = v - mean
+            mean += delta / count
+            delta2 = v - mean
+            M2 += delta * delta2
+    if count == 0:
+        mean_f = np.zeros((6,), dtype=np.float32)
+        std_f  = np.ones((6,), dtype=np.float32)
+    else:
+        var = (M2 / max(count - 1, 1))
+        std_f  = np.sqrt(var).astype(np.float32)
+        std_f  = np.where(std_f < 1e-6, 1.0, std_f)
+        mean_f = mean.astype(np.float32)
+    return mean_f, std_f
+
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     found = runs(IN_DIR)
     if not found:
         print(f"No runs found in '{IN_DIR}'."); return
+    g_mean, g_std = compute_global_imu_stats(found)
+    with open(os.path.join(OUT_DIR, "imu_stats_global.json"), "w") as f:
+        json.dump({"mean": g_mean.tolist(), "std": g_std.tolist()}, f, indent=2)
     for rd in found:
-        process_run(rd)
+        process_run(rd, g_mean, g_std)
 
 if __name__ == "__main__":
     main()
