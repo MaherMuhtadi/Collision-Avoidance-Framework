@@ -128,22 +128,33 @@ def process_run(run_dir, global_mean, global_std):
             if m_rgb:
                 rgb = preprocess_rgb(cam_p)
             else:
-                rgb = np.zeros((3, IMG_SIZE, IMG_SIZE), dtype=np.float32); miss_rgb += 1
-            rp = os.path.join(rgb_dir, f"rgb_{fid:06d}.npy"); np.save(rp, rgb); rec["rgb"] = rp
+                rgb = np.zeros((3, IMG_SIZE, IMG_SIZE), dtype=np.float32)
+                miss_rgb += 1
+            rp = os.path.join(rgb_dir, f"rgb_{fid:06d}.npy")
+            np.save(rp, rgb)
+            rec["rgb"] = rp
 
             if m_lidar:
                 rim, vmask = preprocess_lidar(np.load(lidar_p))
             else:
                 rim, vmask = (np.zeros((LIDAR_H, LIDAR_W), dtype=np.float32),
-                              np.zeros((LIDAR_H, LIDAR_W), dtype=np.uint8)); miss_lidar += 1
-            lp  = os.path.join(lidar_dir, f"lidar_{fid:06d}.npy");       np.save(lp,  rim);   rec["lidar_range"] = lp
-            lvp = os.path.join(lidar_dir, f"lidar_valid_{fid:06d}.npy"); np.save(lvp, vmask); rec["lidar_valid"] = lvp
+                              np.zeros((LIDAR_H, LIDAR_W), dtype=np.uint8))
+                miss_lidar += 1
+            lp  = os.path.join(lidar_dir, f"lidar_{fid:06d}.npy")
+            np.save(lp,  rim)
+            rec["lidar_range"] = lp
+            lvp = os.path.join(lidar_dir, f"lidar_valid_{fid:06d}.npy")
+            np.save(lvp, vmask)
+            rec["lidar_valid"] = lvp
 
             if m_imu:
                 iv = imu_norm(imu_d, global_mean, global_std)
             else:
-                iv = np.zeros((6,), dtype=np.float32); miss_imu += 1
-            ip = os.path.join(imu_dir, f"imu_{fid:06d}.npy"); np.save(ip, iv); rec["imu"] = ip
+                iv = np.zeros((6,), dtype=np.float32)
+                miss_imu += 1
+            ip = os.path.join(imu_dir, f"imu_{fid:06d}.npy")
+            np.save(ip, iv)
+            rec["imu"] = ip
 
         except Exception:
             skipped += 1
@@ -200,7 +211,8 @@ def main():
     os.makedirs(OUT_DIR, exist_ok=True)
     found = runs(IN_DIR)
     if not found:
-        print(f"No runs found in '{IN_DIR}'."); return
+        print(f"No runs found in '{IN_DIR}'.")
+        return
     g_mean, g_std = compute_global_imu_stats(found)
     with open(os.path.join(OUT_DIR, "imu_stats_global.json"), "w") as f:
         json.dump({"mean": g_mean.tolist(), "std": g_std.tolist()}, f, indent=2)
