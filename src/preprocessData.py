@@ -36,7 +36,7 @@ def load_meta(run_dir):
     items = [(int(k), v) for k, v in data.items()]
     return items
 
-def preprocess_rgb(p):
+def preprocess_img(p):
     with Image.open(p) as im:
         im = im.convert("RGB").resize((IMG_SIZE, IMG_SIZE), resample=Image.BILINEAR)
         a = np.asarray(im, dtype=np.float32) / 255.0
@@ -102,37 +102,37 @@ def process_run(run_dir, global_mean, global_std):
     items = load_meta(run_dir)
     run_name = os.path.basename(run_dir.rstrip(os.sep))
     out_run = os.path.join(OUT_DIR, run_name)
-    rgb_dir = os.path.join(out_run, "Camera")
+    img_dir = os.path.join(out_run, "Image")
     lidar_dir = os.path.join(out_run, "Lidar")
     imu_dir = os.path.join(out_run, "IMU")
-    os.makedirs(rgb_dir, exist_ok=True)
+    os.makedirs(img_dir, exist_ok=True)
     os.makedirs(lidar_dir, exist_ok=True)
     os.makedirs(imu_dir, exist_ok=True)
 
     index, labels = {}, {}
     kept, skipped = 0, 0
-    miss_rgb = miss_lidar = miss_imu = 0
+    miss_img = miss_lidar = miss_imu = 0
 
     for fid, data in items:
-        cam_p   = data.get("camera_path")
+        img_p   = data.get("image_path")
         lidar_p = data.get("lidar_path")
         imu_d   = data.get("imu")
 
         rec = {}
         # 1 = present, 0 = padded
-        m_rgb   = 1 if cam_p   else 0
+        m_img   = 1 if img_p   else 0
         m_lidar = 1 if lidar_p else 0
         m_imu   = 1 if imu_d   else 0
 
         try:
-            if m_rgb:
-                rgb = preprocess_rgb(cam_p)
+            if m_img:
+                img = preprocess_img(img_p)
             else:
-                rgb = np.zeros((3, IMG_SIZE, IMG_SIZE), dtype=np.float32)
-                miss_rgb += 1
-            rp = os.path.join(rgb_dir, f"rgb_{fid:06d}.npy")
-            np.save(rp, rgb)
-            rec["rgb"] = rp
+                img = np.zeros((3, IMG_SIZE, IMG_SIZE), dtype=np.float32)
+                miss_img += 1
+            rp = os.path.join(img_dir, f"image_{fid:06d}.npy")
+            np.save(rp, img)
+            rec["image"] = rp
 
             if m_lidar:
                 rim, vmask = preprocess_lidar(np.load(lidar_p))
@@ -143,9 +143,9 @@ def process_run(run_dir, global_mean, global_std):
             lp  = os.path.join(lidar_dir, f"lidar_{fid:06d}.npy")
             np.save(lp,  rim)
             rec["lidar_range"] = lp
-            lvp = os.path.join(lidar_dir, f"lidar_valid_{fid:06d}.npy")
+            lvp = os.path.join(lidar_dir, f"lidar_mask_{fid:06d}.npy")
             np.save(lvp, vmask)
-            rec["lidar_valid"] = lvp
+            rec["lidar_mask"] = lvp
 
             if m_imu:
                 iv = imu_norm(imu_d, global_mean, global_std)
@@ -161,7 +161,7 @@ def process_run(run_dir, global_mean, global_std):
             continue
 
         # Frame-level presence mask the model can read
-        rec["modality_mask"] = {"rgb": m_rgb, "lidar": m_lidar, "imu": m_imu}
+        rec["modality_mask"] = {"image": m_img, "lidar": m_lidar, "imu": m_imu}
 
         rec["label"] = int(data.get("collision", 0))
         index[str(fid)] = rec
@@ -176,7 +176,7 @@ def process_run(run_dir, global_mean, global_std):
             "frames_seen": len(items),
             "frames_processed": kept,
             "frames_skipped": skipped,
-            "missing_modalities_counts": {"rgb": miss_rgb, "lidar": miss_lidar, "imu": miss_imu}
+            "missing_modalities_counts": {"image": miss_img, "lidar": miss_lidar, "imu": miss_imu}
         }, f, indent=2)
 
     print(f"'{run_name}' processed and saved to '{out_run}'")

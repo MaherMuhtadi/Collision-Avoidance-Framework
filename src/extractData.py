@@ -33,7 +33,7 @@ def discover_shelve_bases(base_dir="SensorData"):
             bases.add(root)
     return bases
 
-def save_single_frame(frame_id, data, camera_dir, lidar_dir):
+def save_single_frame(frame_id, data, image_dir, lidar_dir):
     missing = [mod for mod in REQUIRED_MODALITIES if mod not in data]
 
     if "imu" in missing:
@@ -41,14 +41,14 @@ def save_single_frame(frame_id, data, camera_dir, lidar_dir):
 
     # Camera: save if present, else path None
     if "camera_data" not in missing:
-        path_img = os.path.join(camera_dir, f"camera_{frame_id:06d}.png")
+        path_img = os.path.join(image_dir, f"image_{frame_id:06d}.png")
         bgr = data["camera_data"]
         rgb = bgr[:, :, ::-1]  # BGR -> RGB
         Image.fromarray(rgb).save(path_img)
-        data["camera_path"] = path_img
+        data["image_path"] = path_img
         del data["camera_data"]
     else:
-        data["camera_path"] = None
+        data["image_path"] = None
 
     # LiDAR: save if present, else path None
     if "lidar_data" not in missing:
@@ -64,9 +64,9 @@ def save_single_frame(frame_id, data, camera_dir, lidar_dir):
 def process_single_run(shelve_dir, out_dir):
     run_name = os.path.basename(shelve_dir.rstrip(os.sep))
     run_dir = os.path.join(out_dir, run_name)
-    camera_dir = os.path.join(run_dir, 'Camera')
+    image_dir = os.path.join(run_dir, 'Image')
     lidar_dir  = os.path.join(run_dir, 'Lidar')
-    os.makedirs(camera_dir, exist_ok=True)
+    os.makedirs(image_dir, exist_ok=True)
     os.makedirs(lidar_dir,  exist_ok=True)
 
     final_frame_data = {}
@@ -88,7 +88,7 @@ def process_single_run(shelve_dir, out_dir):
     print("Padding and saving frame data...")
     with ThreadPoolExecutor(max_workers=8) as executor:
         def _worker(item):
-            return save_single_frame(item[0], item[1], camera_dir, lidar_dir)
+            return save_single_frame(item[0], item[1], image_dir, lidar_dir)
         results = sorted(list(executor.map(_worker, items)))
 
     for frame_id, data, missing in results:
