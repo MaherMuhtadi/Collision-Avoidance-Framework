@@ -9,8 +9,13 @@ WINDOW, FPS = 3, 30
 REQUIRED_MODALITIES = ["camera_data", "lidar_data", "imu"]
 raw_dir = 'SensorData'
 extraction_dir = 'ExtractedData'
+total_runs = 0
+collision_runs = 0
+total_rows = 0
+collision_rows = 0
 
 def label(frame_data, collision_frame, window=WINDOW, fps=FPS):
+    global collision_rows
     if collision_frame is None:
         for fid, data in frame_data.items():
             data["collision"] = 0
@@ -19,6 +24,7 @@ def label(frame_data, collision_frame, window=WINDOW, fps=FPS):
     for fid, data in frame_data.items():
         if collision_frame - window_frames <= fid <= collision_frame:
             data['collision'] = 1
+            collision_rows += 1
         else:
             data['collision'] = 0
 
@@ -62,6 +68,7 @@ def save_single_frame(frame_id, data, image_dir, lidar_dir):
     return frame_id, data, missing
 
 def process_single_run(shelve_dir, out_dir):
+    global total_runs, collision_runs, total_rows, collision_rows
     run_name = os.path.basename(shelve_dir.rstrip(os.sep))
     run_dir = os.path.join(out_dir, run_name)
     image_dir = os.path.join(run_dir, 'Image')
@@ -80,6 +87,7 @@ def process_single_run(shelve_dir, out_dir):
             collision_ids = [int(fid) for fid, d in frame_data.items() if d.get('collision') == 1]
             if collision_ids:
                 final_frame = min(collision_ids)
+                collision_runs += 1
             # Convert keys to integers for ordering and truncate list until the first collision
             items = [(int(k), v) for k, v in frame_data.items() if final_frame is None or int(k) <= final_frame]
     except Exception as e:
@@ -105,6 +113,7 @@ def process_single_run(shelve_dir, out_dir):
         json.dump(final_frame_data, f, indent=2)
 
     # Save summary
+    total_rows += len(total_frames_seen)
     summary = {
         "frames_played": len(total_frames_seen),
         "padded_frames": len(padded_frames),
@@ -114,6 +123,7 @@ def process_single_run(shelve_dir, out_dir):
     with open(os.path.join(run_dir, 'summary.json'), 'w') as f:
         json.dump(summary, f, indent=2)
     
+    total_runs += 1
     print(f"Saved data to '{out_dir}'.")
 
 def extract_data(in_dir=raw_dir, out_dir=extraction_dir):
@@ -126,3 +136,12 @@ def extract_data(in_dir=raw_dir, out_dir=extraction_dir):
 
 if __name__ == "__main__":
     extract_data()
+    with open(os.path.join(extraction_dir, 'data_summary.json'), 'w') as f:
+        json.dump({
+            "total_frames": total_rows,
+            "label_0": total_rows - collision_rows,
+            "label_1": collision_rows,
+            "total_scenarios": total_runs,
+            "safe_scenarios": total_runs - collision_runs,
+            "collision_scenarios": collision_runs
+        }, f, indent=2)
