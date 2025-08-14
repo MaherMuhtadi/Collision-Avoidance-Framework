@@ -17,6 +17,7 @@ lidar_settings.json
 SensorData
 ExtractedData
 PreprocessedData
+Dataset
 
 # Documentation draft
 Documentation.pdf
