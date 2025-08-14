@@ -11,4 +11,6 @@ dependencies = [
     "psutil>=7.0.0",
     "pygame>=2.6.1",
     "python-dotenv>=1.1.1",
+    "torch>=2.8.0",
+    "torchvision>=0.23.0",
 ]
