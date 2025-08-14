@@ -42,6 +42,66 @@ def load_jsonl(path: str):
             if line.strip():
                 yield json.loads(line)
 
+
+# --- Support for new createFrameWindows.py output (start/end frames) ---
+_RUN_INDEX: Dict[str, Dict[int, dict]] = {}
+
+def _get_run_index(run: str) -> Dict[int, dict]:
+    """Load and cache mapping: frame_id -> record from PreprocessedData/<run>/preprocessed_data.json.
+    Accepts either dict keyed by frame_id or list of {frame_id, ...}.
+    """
+    if run in _RUN_INDEX:
+        return _RUN_INDEX[run]
+    pre_json = os.path.join(PREPROCESSED_ROOT, run, "preprocessed_data.json")
+    if not os.path.isfile(pre_json):
+        raise FileNotFoundError(f"Expected per-run preprocessed file not found: {pre_json}")
+    with open(pre_json, "r") as f:
+        data = json.load(f)
+    mapping: Dict[int, dict] = {}
+    if isinstance(data, dict):
+        for k, rec in data.items():
+            try:
+                fid = int(k)
+            except Exception:
+                continue
+            mapping[fid] = rec
+    elif isinstance(data, list):
+        for rec in data:
+            try:
+                fid = int(rec.get("frame_id"))
+            except Exception:
+                continue
+            mapping[fid] = rec
+    else:
+        raise ValueError("Unsupported format for preprocessed_data.json (expected dict or list).")
+    _RUN_INDEX[run] = mapping
+    return mapping
+
+def _parse_modality_mask(mm) -> Tuple[bool, bool, bool]:
+    """Return (image,lidar,imu) availability booleans from a variety of encodings."""
+    if isinstance(mm, dict):
+        return bool(mm.get("image", 1)), bool(mm.get("lidar", 1)), bool(mm.get("imu", 1))
+    if isinstance(mm, (list, tuple)) and len(mm) >= 3:
+        return bool(mm[0]), bool(mm[1]), bool(mm[2])
+    # Fallback: assume available
+    return True, True, True
+
+def get_frame_ids(sample: Dict) -> List[int]:
+    """Back-compat helper: prefer explicit frame_ids; otherwise derive from start/end."""
+    fids = sample.get("frame_ids")
+    if isinstance(fids, list) and len(fids) > 0:
+        return [int(x) for x in fids]
+    if "start_frame" in sample and "end_frame" in sample:
+        s = int(sample["start_frame"]); e = int(sample["end_frame"])
+        if e < s:
+            raise ValueError(f"end_frame {e} < start_frame {s}")
+        return list(range(s, e + 1))
+    # Older fallback: some formats used end_fid + window_frames
+    if "end_fid" in sample and "window_frames" in sample:
+        e = int(sample["end_fid"]); T = int(sample["window_frames"])
+        return list(range(e - T + 1, e + 1))
+    return []
+
 def sinusoidal_position_encoding(length: int, dim: int, device: str) -> torch.Tensor:
     """Standard transformer sinusoidal positional encoding (per frame)."""
     # pe[t, 2i] = sin(t / 10000^(2i/d)), pe[t, 2i+1] = cos(t / 10000^(2i/d))
@@ -217,98 +277,97 @@ class MultiModalTokenizer(nn.Module):
     @torch.no_grad()
     def tokenize_window(self, window: Dict) -> Dict:
         """
-        window: a dict from the JSONL (one line), fields:
-            frame_ids, image[], lidar_range[], lidar_mask[], imu[], modality_masks[], label
-        Returns:
-            {
-              "tokens": Tensor [T*5, D],
-              "mask":   dict with modality mask [T,3] and availability [T,4],
-              "meta":   dict
-            }
+        Tokenize one window. Supports both old window format (explicit per-frame file lists)
+        and the new format from createFrameWindows.py (run + start/end frames).
         """
-        frame_ids: List[int] = window["frame_ids"]
+        # Resolve frame ids
+        frame_ids: List[int] = get_frame_ids(window)
+        if not frame_ids:
+            # Fallback for legacy inputs that already carry arrays
+            frame_ids = [int(x) for x in window.get("frame_ids", [])]
         T = len(frame_ids)
 
-        # Load per-frame arrays into tensors on device
+        # Branch: if explicit file lists are present, use them for back-compat
+        has_explicit_files = all(k in window for k in ["image", "lidar_range", "lidar_mask", "imu", "modality_masks"])
         imgs, rims, imus = [], [], []
         a_img_list, a_lidar_list, a_imu_list = [], [], []
-        for t in range(T):
-            # image
-            img_arr = np.load(window["image"][t]).astype(np.float32)  # [3,224,224] already normalized
-            imgs.append(torch.from_numpy(img_arr))
-            # lidar (range + validity)
-            rim = np.load(window["lidar_range"][t]).astype(np.float32)  # [H,W]
-            vmask = np.load(window["lidar_mask"][t]).astype(np.uint8)   # [H,W]
-            rim2 = np.stack([rim, vmask.astype(np.float32)], axis=0)    # [2,H,W]
-            rims.append(torch.from_numpy(rim2))
-            # imu (6,)
-            imu = np.load(window["imu"][t]).astype(np.float32)
-            imus.append(torch.from_numpy(imu))
-            # masks
-            mm = window["modality_masks"][t]
-            a_img_list.append(1 if int(mm.get("image", 1)) == 1 else 0)
-            a_lidar_list.append(1 if int(mm.get("lidar", 1)) == 1 else 0)
-            a_imu_list.append(1 if int(mm.get("imu",   1)) == 1 else 0)
 
-        imgs  = torch.stack(imgs,  dim=0).to(self.device)  # [T,3,H,W]
-        rims  = torch.stack(rims,  dim=0).to(self.device)  # [T,2,H,W]
-        imus  = torch.stack(imus,  dim=0).to(self.device)  # [T,6]
-        a_img   = torch.tensor(a_img_list,   device=self.device, dtype=torch.bool)  # [T]
-        a_lidar = torch.tensor(a_lidar_list, device=self.device, dtype=torch.bool)  # [T]
-        a_imu   = torch.tensor(a_imu_list,   device=self.device, dtype=torch.bool)  # [T]
+        if has_explicit_files:
+            for t in range(T):
+                img_arr = np.load(window["image"][t]).astype(np.float32)  # [3,224,224] normalized
+                imgs.append(torch.from_numpy(img_arr))
+                rim = np.load(window["lidar_range"][t]).astype(np.float32)  # [H,W]
+                vmask = np.load(window["lidar_mask"][t]).astype(np.uint8)   # [H,W]
+                rim2 = np.stack([rim, vmask.astype(np.float32)], axis=0)    # [2,H,W]
+                rims.append(torch.from_numpy(rim2))
+                imu = np.load(window["imu"][t]).astype(np.float32)
+                imus.append(torch.from_numpy(imu))
+                mm = window["modality_masks"][t]
+                a_img_list.append(bool(mm["image"]) if isinstance(mm, dict) else bool(mm[0]))
+                a_lidar_list.append(bool(mm["lidar"]) if isinstance(mm, dict) else bool(mm[1]))
+                a_imu_list.append(bool(mm["imu"]) if isinstance(mm, dict) else bool(mm[2]))
+        else:
+            # New format: fetch paths from PreprocessedData/<run>/preprocessed_data.json
+            run = window.get("run")
+            if not run:
+                raise KeyError("Missing 'run' in window sample; required for new format.")
+            index = _get_run_index(run)
+            for fid in frame_ids:
+                rec = index.get(int(fid))
+                if rec is None:
+                    raise KeyError(f"Frame id {fid} not found in preprocessed index for run '{run}'.")
+                # Load arrays
+                img_arr = np.load(rec["image"]).astype(np.float32)                 # [3,224,224] normalized
+                imgs.append(torch.from_numpy(img_arr))
+                rim = np.load(rec["lidar_range"]).astype(np.float32)               # [H,W]
+                vmask = np.load(rec["lidar_mask"]).astype(np.uint8)                # [H,W]
+                rim2 = np.stack([rim, vmask.astype(np.float32)], axis=0)           # [2,H,W]
+                rims.append(torch.from_numpy(rim2))
+                imu = np.load(rec["imu"]).astype(np.float32)                       # [6,]
+                imus.append(torch.from_numpy(imu))
+                # modality availability
+                mm = rec.get("modality_mask", rec.get("modality_masks", None))
+                a_img, a_lidar, a_imu = _parse_modality_mask(mm)
+                a_img_list.append(a_img); a_lidar_list.append(a_lidar); a_imu_list.append(a_imu)
+
+        # Stack to tensors on device
+        imgs_t = torch.stack(imgs, dim=0).to(torch.float32).to(self.device)       # [T,3,224,224]
+        rims_t = torch.stack(rims, dim=0).to(torch.float32).to(self.device)       # [T,2,H,W]
+        imus_t = torch.stack(imus, dim=0).to(torch.float32).to(self.device)       # [T,6]
 
         # Compute availability embedding input per frame
-        a_float = torch.stack([
-            a_img.float(), a_lidar.float(), a_imu.float(),
-            (a_img.float() + a_lidar.float() + a_imu.float())
-        ], dim=1)  # [T,4]
-        e_avail = self.avail_enc(a_float)  # [T, D]
+        a_img = torch.tensor(a_img_list, dtype=torch.float32, device=self.device)     # [T]
+        a_lidar = torch.tensor(a_lidar_list, dtype=torch.float32, device=self.device) # [T]
+        a_imu = torch.tensor(a_imu_list, dtype=torch.float32, device=self.device)     # [T]
 
-        # Embed present modalities
-        e_img_raw, e_lidar_raw, e_imu_raw = self._embed_modalities(imgs, a_img, rims, a_lidar, imus, a_imu)  # [T,D] each
+        # --- The rest mirrors the original implementation ---
+        # Encoders (compute only where available)
+        e_img, e_lidar, e_imu = self._embed_modalities(imgs_t, a_img, rims_t, a_lidar, imus_t, a_imu)
 
-        # Carry-forward imputation per modality
-        def impute(e_raw: torch.Tensor, avail: torch.BoolTensor, e_miss: torch.Tensor) -> torch.Tensor:
-            out = torch.empty_like(e_raw)
-            prev_valid = None  # previous valid embedding vector
-            for t in range(T):
-                if avail[t]:
-                    out[t] = e_raw[t]
-                    prev_valid = e_raw[t]
-                else:
-                    if prev_valid is None:
-                        out[t] = e_miss
-                    else:
-                        out[t] = self.beta * prev_valid + (1.0 - self.beta) * e_miss
-            return out
+        # Availability embedding
+        avail_vec = torch.stack([a_img, a_lidar, a_imu, (a_img + a_lidar + a_imu)], dim=1)     # [T,4]
+        e_avail = self.avail_enc(avail_vec)                         # [T,D]
+# CLS token per frame (learned)
+        cls = self.cls_token.expand(T, -1)                          # [T,D]
 
-        e_img   = impute(e_img_raw,   a_img,   self.e_miss_image)  # [T,D]
-        e_lidar = impute(e_lidar_raw, a_lidar, self.e_miss_lidar)  # [T,D]
-        e_imu   = impute(e_imu_raw,   a_imu,   self.e_miss_imu)    # [T,D]
+        # Positional encodings
+        pe = sinusoidal_position_encoding(T, self.embed_dim, self.device)  # [T,D]
 
         # Build per-frame token set: [image, lidar, imu, avail, cls]
-        cls = self.cls_token.unsqueeze(0).expand(T, -1)  # [T,D]
         tokens_per_frame = torch.stack([e_img, e_lidar, e_imu, e_avail, cls], dim=1)  # [T,5,D]
-
         # Add temporal positional encoding (same PE for all tokens of a frame)
-        pe = sinusoidal_position_encoding(T, self.embed_dim, device=self.device)  # [T,D]
-        tokens_per_frame = tokens_per_frame + pe.unsqueeze(1)  # broadcast to [T,5,D]
+        tokens_per_frame = tokens_per_frame + pe.unsqueeze(1)  # [T,5,D]
 
-        # Store per-frame tokens: image,lidar,imu,avail,cls
-        tokens = tokens_per_frame.contiguous()  # [T, 5, D]
-
-        # Build masks for downstream use (e.g., attention key biasing when am=0)
+        # Output
         masks = {
             "modality": torch.stack([a_img, a_lidar, a_imu], dim=1).to(torch.uint8).cpu().numpy(),  # [T,3]
         }
-
         meta = {
             "T": T,
-            "label": int(window["label"]),
-            "frame_ids": window["frame_ids"],
+            "label": int(window.get("label", 0)),
+            "frame_ids": frame_ids,
         }
-
-        return {"tokens": tokens.cpu(), "mask": masks, "meta": meta}
+        return {"tokens": tokens_per_frame.contiguous().cpu(), "mask": masks, "meta": meta}
 
 @dataclass
 class SplitStats:
@@ -323,6 +382,10 @@ def read_expected_window_len(dataset_dir: str) -> int:
         raise FileNotFoundError(f"stats.json not found under {dataset_dir}. Did you run createFrameWindows.py?")
     with open(stats_json, "r") as f:
         j = json.load(f)
+    # New format nests under config.window_frames; keep back-compat fallback.
+    cfg = j.get("config") if isinstance(j, dict) else None
+    if isinstance(cfg, dict) and "window_frames" in cfg:
+        return int(cfg["window_frames"])
     return int(j.get("window_frames", 0))
 
 def process_split(split: str, model: MultiModalTokenizer, expected_T: int) -> SplitStats:
@@ -337,7 +400,8 @@ def process_split(split: str, model: MultiModalTokenizer, expected_T: int) -> Sp
     st = SplitStats()
     manifest = []  # JSONL rows with minimal metadata & file path
     for sample in load_jsonl(in_path):
-        T = len(sample.get("frame_ids", []))
+        fids = get_frame_ids(sample)
+        T = len(fids)
         if T != expected_T:
             st.bad_len += 1
         st.windows += 1
@@ -350,8 +414,10 @@ def process_split(split: str, model: MultiModalTokenizer, expected_T: int) -> Sp
         pack = model.tokenize_window(sample)  # dict with tokens, mask, meta
 
         run = sample.get("run", "run")
-        end_fid = int(sample.get("end_fid", -1))
-        base = f"{slugify(run)}__endfid_{end_fid:06d}.pt"
+        end_fid = int(sample.get("end_frame", sample.get("end_fid", -1)))
+        if end_fid == -1:
+            end_fid = fids[-1] if fids else -1
+        base = f"{slugify(run)}__endframe_{end_fid:06d}.pt"
         out_fp = os.path.join(out_split_dir, base)
 
         torch.save(pack, out_fp)
