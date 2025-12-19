@@ -21,8 +21,5 @@ Dataset
 Tokens
 Results
 
-# Documentation draft
-Documentation.pdf
-
 # Automation script for setting up GPU server
 setup.sh
