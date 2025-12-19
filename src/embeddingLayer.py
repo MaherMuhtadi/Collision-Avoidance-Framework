@@ -245,6 +245,26 @@ class MultiModalTokenizer(nn.Module):
         self.eval()
 
     @torch.no_grad()
+    def _carry_forward(self, embeds: torch.Tensor, avail: torch.Tensor, e_miss: torch.Tensor) -> torch.Tensor:
+        """Apply carry-forward imputation with decay beta when a modality is missing.
+
+        embeds: [T, D] raw embeddings (zeros for missing modalities).
+        avail:  [T] float/bool availability mask (1 = present, 0 = missing).
+        e_miss: [D] learnable missing token for this modality.
+        """
+        out = embeds.clone()
+        prev = None
+        for t in range(out.shape[0]):
+            if avail[t] >= 0.5:
+                prev = out[t]
+            else:
+                if prev is None:
+                    out[t] = e_miss
+                else:
+                    out[t] = self.beta * prev + (1 - self.beta) * e_miss
+        return out
+
+    @torch.no_grad()
     def _embed_modalities(self,
                           imgs: torch.Tensor, a_img: torch.Tensor,
                           rims: torch.Tensor, a_lidar: torch.Tensor,
@@ -343,6 +363,11 @@ class MultiModalTokenizer(nn.Module):
         # --- The rest mirrors the original implementation ---
         # Encoders (compute only where available)
         e_img, e_lidar, e_imu = self._embed_modalities(imgs_t, a_img, rims_t, a_lidar, imus_t, a_imu)
+
+        # Carry-forward imputation for missing modalities
+        e_img   = self._carry_forward(e_img, a_img,   self.e_miss_image)
+        e_lidar = self._carry_forward(e_lidar, a_lidar, self.e_miss_lidar)
+        e_imu   = self._carry_forward(e_imu, a_imu,   self.e_miss_imu)
 
         # Availability embedding
         avail_vec = torch.stack([a_img, a_lidar, a_imu, (a_img + a_lidar + a_imu)], dim=1)     # [T,4]
