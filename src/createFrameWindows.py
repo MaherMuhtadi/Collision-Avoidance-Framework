@@ -1,32 +1,43 @@
+"""
+Dataset creation for CARLA collision prediction using my runs. Feel free to modify according to your runs.
+
+Collision scenarios (positive samples):
+- RearEnd: Vehicle approaches from behind and collides
+- SideCollision: Vehicle collides from the side (lane change)
+- BlindSpot: Vehicle in blind spot causes collision during lane change
+
+Non-collision scenarios (negative samples):
+- EmptyRoad: Clear road with no other vehicles
+- LightTraffic: Sparse traffic, no dangerous situations
+- HeavyTraffic: Dense traffic requiring careful navigation
+- Tailgating: Following vehicle closely but maintaining safe distance
+- Overtake: Safe overtaking maneuvers without collision
+"""
+
 from __future__ import annotations
 import os
 import json
 import random
 import re
 from collections import defaultdict, Counter
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
-# ---------- Configuration ----------
-
+# Configuration
 PRE_DIR: str = "PreprocessedData"
 OUT_DIR: str = "Dataset"
 PRE_JSON_NAME: str = "preprocessed_data.json"
 
-# Window spec: set exactly one of WINDOW_FRAMES or WINDOW_SECONDS (or leave both None for default 1s at FPS)
-WINDOW_FRAMES: int | None = None       # e.g., 60 for a 2-second window at 30 FPS
-WINDOW_SECONDS: float | None = 2.0     # If set, requires FPS
+WINDOW_FRAMES: int | None = None
+WINDOW_SECONDS: float | None = 2.0
 FPS: float = 30.0
 
-# Reduced redundancy defaults (you can change these)
-POS_STRIDE: int = 3                    # Stride for positive windows
-NEG_STRIDE: int = 8                    # Stride for negative windows
+POS_STRIDE: int = 3
+NEG_STRIDE: int = 8
 
-# Train/val/test ratios (sum to 1.0)
 TRAIN_RATIO: float = 0.65
 VAL_RATIO: float = 0.15
 TEST_RATIO: float = 0.20
 
-# Random seed for deterministic splits
 SEED: int = 13
 
 # Optional: hard-pin specific runs to splits (these reflect the suggested swaps)
@@ -37,36 +48,30 @@ SPLIT_OVERRIDES = {
     "test": {"RearEnd1", "Overtake4"},
 }
 
-# Scenario families (derived from Data_Description.txt)
 COLLISION_SCENARIOS = {"RearEnd", "SideCollision", "BlindSpot"}
 NONCOLLISION_SCENARIOS = {"EmptyRoad", "LightTraffic", "HeavyTraffic", "Tailgating", "Overtake"}
 
-# -----------------------------------
-
 
 def _prefix(run_name: str) -> str:
-    """Extract alphabetic prefix from run name, e.g., 'RearEnd1' -> 'RearEnd'."""
+    """Extract alphabetic prefix from run name."""
     m = re.match(r"[A-Za-z]+", run_name)
     return m.group(0) if m else run_name
 
 
 def _is_collision(prefix: str) -> bool:
+    """Check if scenario prefix indicates a collision scenario."""
     return prefix in COLLISION_SCENARIOS
 
 
 def _list_runs(pre_dir: str) -> List[str]:
-    """List run directory names under pre_dir (ignores files)."""
+    """List run directory names."""
     if not os.path.isdir(pre_dir):
         return []
     return sorted([d for d in os.listdir(pre_dir) if os.path.isdir(os.path.join(pre_dir, d))])
 
 
 def _load_run_frames(pre_dir: str, run: str) -> List[tuple[int, int]]:
-    """
-    Load (frame_id, label) pairs for a run.
-    Expects PRE_JSON_NAME inside PRE_DIR/run.
-    Returns a list sorted by frame_id. If missing or malformed, returns empty list.
-    """
+    """Load (frame_id, label) pairs for a run."""
     p = os.path.join(pre_dir, run, PRE_JSON_NAME)
     if not os.path.isfile(p):
         return []
@@ -77,7 +82,6 @@ def _load_run_frames(pre_dir: str, run: str) -> List[tuple[int, int]]:
         return []
     items = []
     if isinstance(data, dict):
-        # keys might be strings
         for k, rec in data.items():
             try:
                 fid = int(k)
@@ -86,7 +90,6 @@ def _load_run_frames(pre_dir: str, run: str) -> List[tuple[int, int]]:
             lab = int(rec.get("label", 0))
             items.append((fid, lab))
     elif isinstance(data, list):
-        # list of {frame_id, label}
         for rec in data:
             try:
                 fid = int(rec.get("frame_id"))
@@ -99,25 +102,19 @@ def _load_run_frames(pre_dir: str, run: str) -> List[tuple[int, int]]:
 
 
 def _scenario_buckets(runs: List[str]) -> Dict[tuple[bool, str], List[str]]:
-    """
-    Group runs by (is_collision, scenario_prefix).
-    """
+    """Group runs by (is_collision, scenario_prefix)."""
     buckets: Dict[tuple[bool, str], List[str]] = defaultdict(list)
     for r in runs:
         pref = _prefix(r)
         coll = _is_collision(pref)
         buckets[(coll, pref)].append(r)
-    # Stable order inside each bucket
     for k in buckets:
         buckets[k].sort()
     return buckets
 
 
 def _apply_overrides(runs: List[str], split: Dict[str, List[str]]) -> None:
-    """
-    Move any runs mentioned in SPLIT_OVERRIDES into their requested split.
-    Later logic will fill the remaining runs respecting ratios and coverage.
-    """
+    """Apply SPLIT_OVERRIDES to assign specific runs to splits."""
     all_runs = set(runs)
     # Remove any already assigned to avoid duplicates
     assigned = set(sum(split.values(), []))
@@ -131,68 +128,53 @@ def _apply_overrides(runs: List[str], split: Dict[str, List[str]]) -> None:
 def _scenario_aware_split(runs: List[str],
                           train_r: float, val_r: float, test_r: float,
                           seed: int) -> Dict[str, List[str]]:
-    """
-    Create per-run splits that try to ensure coverage of scenario types
-    in each split while roughly honoring target ratios.
-    """
+    """Create splits ensuring scenario coverage while honoring target ratios."""
     rng = random.Random(seed)
     split = {"train": [], "val": [], "test": []}
 
-    # First, apply hard overrides (if present in this dataset)
     _apply_overrides(runs, split)
 
-    # Remaining pool
     already = set(sum(split.values(), []))
     pool = [r for r in runs if r not in already]
     rng.shuffle(pool)
 
     buckets = _scenario_buckets(pool)
-    # Round-robin assignment per bucket across splits, to seed coverage
     order = ["train", "val", "test"]
     for key, group in buckets.items():
         i = 0
         for r in group:
             split[order[i % 3]].append(r)
             i += 1
-
-    # Now, rebalance roughly to the desired ratios while preserving coverage
     total = len(runs)
     target_counts = {
         "train": int(round(total * train_r)),
         "val": int(round(total * val_r)),
         "test": int(round(total * test_r)),
     }
-    # Small adjustment to ensure sum equals total
     diff = total - sum(target_counts.values())
     if diff != 0:
         target_counts["train"] += diff
 
     def coverage_ok(s: List[str]) -> bool:
-        # Check that s covers collision families and non-collision families as possible
         prefs = {_prefix(x) for x in s}
         coll_covered = len(prefs & COLLISION_SCENARIOS) >= min(len(COLLISION_SCENARIOS), len(prefs & COLLISION_SCENARIOS))
         noncoll_covered = len(prefs & NONCOLLISION_SCENARIOS) >= min(len(NONCOLLISION_SCENARIOS), len(prefs & NONCOLLISION_SCENARIOS))
         return True if not s else (len(prefs) >= 2 and (coll_covered or any(_is_collision(_prefix(x)) for x in s) == False))
 
-    # Simple size rebalancing with a guard to avoid emptying coverage
     def take_from(src: str, dst: str):
-        # find a candidate in src that is not the only representative of its scenario in src
         for i, r in enumerate(split[src]):
             pref = _prefix(r)
-            # ensure moving r doesn't drop src's coverage of pref to zero (if it had >1)
             if sum(1 for x in split[src] if _prefix(x) == pref) > 1:
                 split[dst].append(r)
                 del split[src][i]
                 return True
         return False
 
-    # Rebalance sizes
     changed = True
     while changed:
         changed = False
         for k in ["train", "val", "test"]:
-            while len(split[k]) > target_counts[k] + 1:  # allow off-by-1 tolerance
-                # move to the smallest split
+            while len(split[k]) > target_counts[k] + 1:
                 dst = min(["train", "val", "test"], key=lambda x: len(split[x]) - target_counts[x])
                 if dst == k:
                     break
@@ -205,14 +187,10 @@ def _scenario_aware_split(runs: List[str],
 
 
 def _ensure_min_test_coverage(split: Dict[str, List[str]]) -> None:
-    """
-    Ensure test has at least one of each collision scenario if available elsewhere;
-    if missing, steal one run from train/val for that scenario.
-    """
+    """Ensure test split includes at least one run per collision scenario."""
     test_prefs = {_prefix(r) for r in split["test"]}
     for needed in sorted(COLLISION_SCENARIOS):
         if needed not in test_prefs:
-            # try to move one from train, then val
             for src in ("train", "val"):
                 for i, r in enumerate(split[src]):
                     if _prefix(r) == needed:
@@ -226,10 +204,7 @@ def _ensure_min_test_coverage(split: Dict[str, List[str]]) -> None:
 
 def _make_windows_for_run(frames: List[tuple[int, int]], window_frames: int,
                           pos_stride: int, neg_stride: int) -> Dict[str, List[dict]]:
-    """
-    Returns dict {"pos": [window dicts], "neg": [window dicts]}
-    Window label is the end-frame label.
-    """
+    """Create sliding windows from frames, returning positive and negative samples."""
     n = len(frames)
     if n == 0 or window_frames <= 0:
         return {"pos": [], "neg": []}
@@ -251,6 +226,7 @@ def _make_windows_for_run(frames: List[tuple[int, int]], window_frames: int,
 
 
 def _write_jsonl(path: str, rows: List[dict]) -> None:
+    """Write data rows to JSONL file."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w") as f:
         for r in rows:
@@ -266,36 +242,30 @@ def build_dataset(pre_dir: str = PRE_DIR,
                   pos_stride: int = POS_STRIDE,
                   neg_stride: int = NEG_STRIDE,
                   seed: int = SEED) -> None:
+    """Build train/val/test dataset splits from preprocessed data."""
 
-    # Resolve window_frames
     if window_frames is None:
         if WINDOW_SECONDS is None:
-            window_frames = int(FPS)  # default 1s
+            window_frames = int(FPS)
         else:
             window_frames = int(round(FPS * float(WINDOW_SECONDS)))
     assert window_frames > 0, "window_frames must be > 0"
 
-    # Discover runs
     runs = _list_runs(pre_dir)
     if not runs:
         print(f"[WARN] No runs found in {pre_dir}")
         return
 
-    # Create splits
     split = _scenario_aware_split(runs, train_ratio, val_ratio, test_ratio, seed)
     _ensure_min_test_coverage(split)
 
-    # Load frames and build windows per run
     per_run_windows: Dict[str, Dict[str, List[dict]]] = {}
     run_meta: Dict[str, dict] = {}
     for r in runs:
         frames = _load_run_frames(pre_dir, r)
-        # Attach run name and scenario to each window later
         windows = _make_windows_for_run(frames, window_frames, pos_stride, neg_stride)
         per_run_windows[r] = windows
         run_meta[r] = {"scenario": _prefix(r), "is_collision": int(_is_collision(_prefix(r)))}
-
-    # Assemble splits: balance negatives per split to match positives
     final = {"train": [], "val": [], "test": []}
     stats = {"split": {}, "per_scenario": {}}
 
@@ -308,7 +278,6 @@ def build_dataset(pre_dir: str = PRE_DIR,
             for rec in per_run_windows[r]["neg"]:
                 neg_rows.append({"run": r, **rec, **meta})
 
-        # Balance negatives to #pos
         rng = random.Random(seed + hash(split_name) % (2**16))
         needed = len(pos_rows)
         if len(neg_rows) > needed and needed > 0:
@@ -318,7 +287,6 @@ def build_dataset(pre_dir: str = PRE_DIR,
         rng.shuffle(rows)
         final[split_name] = rows
 
-        # Collect stats
         stats["split"][split_name] = {
             "runs": split[split_name],
             "pos": len(pos_rows),
@@ -326,11 +294,8 @@ def build_dataset(pre_dir: str = PRE_DIR,
             "total": len(rows),
         }
 
-        # Per-scenario coverage
         sc_counts = Counter([r["scenario"] for r in rows])
         stats["per_scenario"][split_name] = dict(sc_counts)
-
-    # Write files
     os.makedirs(out_dir, exist_ok=True)
     for k in ("train", "val", "test"):
         _write_jsonl(os.path.join(out_dir, f"{k}.jsonl"), final[k])
@@ -346,8 +311,6 @@ def build_dataset(pre_dir: str = PRE_DIR,
     }
     with open(os.path.join(out_dir, "stats.json"), "w") as f:
         json.dump(stats, f, indent=2)
-
-    # Console summary
     print("=== Split summary ===")
     for k in ("train", "val", "test"):
         s = stats["split"][k]
@@ -357,6 +320,7 @@ def build_dataset(pre_dir: str = PRE_DIR,
 
 
 def main():
+    """Entry point for dataset creation."""
     random.seed(SEED)
     build_dataset()
 

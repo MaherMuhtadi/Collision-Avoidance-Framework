@@ -21,6 +21,7 @@ IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
 IMAGENET_STD  = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 def runs(in_dir):
+    """Find all run directories in input directory."""
     out = []
     if not os.path.isdir(in_dir):
         return out
@@ -31,12 +32,14 @@ def runs(in_dir):
     return out
 
 def load_meta(run_dir):
+    """Load metadata from run directory."""
     with open(os.path.join(run_dir, JSON_FILE), "r") as f:
         data = json.load(f)
     items = [(int(k), v) for k, v in data.items()]
     return items
 
 def preprocess_img(p):
+    """Preprocess image with ImageNet normalization."""
     with Image.open(p) as im:
         im = im.convert("RGB").resize((IMG_SIZE, IMG_SIZE), resample=Image.BILINEAR)
         a = np.asarray(im, dtype=np.float32) / 255.0
@@ -44,6 +47,7 @@ def preprocess_img(p):
     return np.transpose(a, (2, 0, 1)).astype(np.float32)
 
 def preprocess_lidar(pts):
+    """Convert LiDAR point cloud to range image."""
     if pts.ndim != 2 or pts.shape[1] < 3:
         raise ValueError("LiDAR array must be [N,3+]")
     x, y, z = pts[:,0].astype(np.float32), pts[:,1].astype(np.float32), pts[:,2].astype(np.float32)
@@ -53,7 +57,6 @@ def preprocess_lidar(pts):
     fup, fdown = math.radians(FOV_UP), math.radians(FOV_DOWN)
     m = (elev >= fdown) & (elev <= fup) & np.isfinite(r) & (r > 0)
 
-    # No points -> all zeros (range and mask)
     if not np.any(m):
         return (np.zeros((LIDAR_H, LIDAR_W), dtype=np.float32),
                 np.zeros((LIDAR_H, LIDAR_W), dtype=np.uint8))
@@ -75,6 +78,7 @@ def preprocess_lidar(pts):
     return rim.astype(np.float32), valid.astype(np.uint8)
 
 def imu_stack(items):
+    """Stack IMU data from multiple frames."""
     out = []
     for _, d in items:
         imu = d.get("imu")
@@ -85,6 +89,7 @@ def imu_stack(items):
     return np.stack(out, axis=0) if out else np.zeros((0,6), dtype=np.float32)
 
 def imu_stats(m):
+    """Compute mean and std for IMU data."""
     if m.size == 0:
         return np.zeros((6,), dtype=np.float32), np.ones((6,), dtype=np.float32)
     mean = m.mean(axis=0).astype(np.float32)
@@ -93,12 +98,14 @@ def imu_stats(m):
     return mean, std
 
 def imu_norm(imu, mean, std):
+    """Normalize IMU data using global statistics."""
     acc = imu.get("acc", [0.0,0.0,0.0])
     gyro = imu.get("gyro", [0.0,0.0,0.0])
     v = np.array(list(acc)+list(gyro), dtype=np.float32)
     return ((v - mean) / std).astype(np.float32)
 
 def process_run(run_dir, global_mean, global_std):
+    """Preprocess all frames in a run directory."""
     items = load_meta(run_dir)
     run_name = os.path.basename(run_dir.rstrip(os.sep))
     out_run = os.path.join(OUT_DIR, run_name)
@@ -119,7 +126,6 @@ def process_run(run_dir, global_mean, global_std):
         imu_d   = data.get("imu")
 
         rec = {}
-        # 1 = present, 0 = padded
         m_img   = 1 if img_p   else 0
         m_lidar = 1 if lidar_p else 0
         m_imu   = 1 if imu_d   else 0
@@ -160,7 +166,6 @@ def process_run(run_dir, global_mean, global_std):
             skipped += 1
             continue
 
-        # Frame-level presence mask the model can read
         rec["modality_mask"] = {"image": m_img, "lidar": m_lidar, "imu": m_imu}
 
         rec["label"] = int(data.get("collision", 0))
@@ -168,7 +173,6 @@ def process_run(run_dir, global_mean, global_std):
         labels[str(fid)] = rec["label"]
         kept += 1
 
-    # When writing the summary, include missing counts
     with open(os.path.join(out_run, "preprocessed_data.json"), "w") as f:
         json.dump(index, f, indent=2)
     with open(os.path.join(out_run, "summary.json"), "w") as f:
@@ -182,13 +186,13 @@ def process_run(run_dir, global_mean, global_std):
     print(f"'{run_name}' processed and saved to '{out_run}'")
 
 def compute_global_imu_stats(run_dirs):
-    # Numerically stable running mean/std (Welford) across all frames
+    """Compute global IMU statistics using Welford's algorithm."""
     count = 0
     mean = np.zeros(6, dtype=np.float64)
     M2   = np.zeros(6, dtype=np.float64)
     for rd in run_dirs:
         items = load_meta(rd)
-        m = imu_stack(items)  # [N,6]
+        m = imu_stack(items)
         if m.size == 0: 
             continue
         for v in m:
@@ -208,6 +212,7 @@ def compute_global_imu_stats(run_dirs):
     return mean_f, std_f
 
 def main():
+    """Preprocess all extracted data runs."""
     os.makedirs(OUT_DIR, exist_ok=True)
     found = runs(IN_DIR)
     if not found:

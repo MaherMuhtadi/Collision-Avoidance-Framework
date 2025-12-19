@@ -15,6 +15,7 @@ total_rows = 0
 collision_rows = 0
 
 def label(frame_data, collision_frame, window=WINDOW, fps=FPS):
+    """Label frames as collision (1) or safe (0) based on time window."""
     global collision_rows
     if collision_frame is None:
         for fid, data in frame_data.items():
@@ -29,6 +30,7 @@ def label(frame_data, collision_frame, window=WINDOW, fps=FPS):
             data['collision'] = 0
 
 def discover_shelve_bases(base_dir="SensorData"):
+    """Discover shelve database files in directory."""
     if not os.path.isdir(base_dir):
         return []
     bases = set()
@@ -40,23 +42,22 @@ def discover_shelve_bases(base_dir="SensorData"):
     return bases
 
 def save_single_frame(frame_id, data, image_dir, lidar_dir):
+    """Save camera and LiDAR data for a single frame."""
     missing = [mod for mod in REQUIRED_MODALITIES if mod not in data]
 
     if "imu" in missing:
         data['imu'] = None
 
-    # Camera: save if present, else path None
     if "camera_data" not in missing:
         path_img = os.path.join(image_dir, f"image_{frame_id:06d}.png")
         bgr = data["camera_data"]
-        rgb = bgr[:, :, ::-1]  # BGR -> RGB
+        rgb = bgr[:, :, ::-1]
         Image.fromarray(rgb).save(path_img)
         data["image_path"] = path_img
         del data["camera_data"]
     else:
         data["image_path"] = None
 
-    # LiDAR: save if present, else path None
     if "lidar_data" not in missing:
         path_lidar = os.path.join(lidar_dir, f"lidar_{frame_id:06d}.npy")
         np.save(path_lidar, data["lidar_data"])
@@ -68,6 +69,7 @@ def save_single_frame(frame_id, data, image_dir, lidar_dir):
     return frame_id, data, missing
 
 def process_single_run(shelve_dir, out_dir):
+    """Extract and process sensor data from a single simulation run."""
     global total_runs, collision_runs, total_rows, collision_rows
     run_name = os.path.basename(shelve_dir.rstrip(os.sep))
     run_dir = os.path.join(out_dir, run_name)
@@ -88,7 +90,6 @@ def process_single_run(shelve_dir, out_dir):
             if collision_ids:
                 final_frame = min(collision_ids)
                 collision_runs += 1
-            # Convert keys to integers for ordering and truncate list until the first collision
             items = [(int(k), v) for k, v in frame_data.items() if final_frame is None or int(k) <= final_frame]
     except Exception as e:
         print(f"Error: {e}")
@@ -108,11 +109,9 @@ def process_single_run(shelve_dir, out_dir):
     print("Adding labels...")
     label(final_frame_data, final_frame)
 
-    # Save valid frames metadata
     with open(os.path.join(run_dir, 'extracted_data.json'), 'w') as f:
         json.dump(final_frame_data, f, indent=2)
 
-    # Save summary
     total_rows += len(total_frames_seen)
     summary = {
         "frames_played": len(total_frames_seen),
@@ -127,6 +126,7 @@ def process_single_run(shelve_dir, out_dir):
     print(f"Saved data to '{out_dir}'.")
 
 def extract_data(in_dir=raw_dir, out_dir=extraction_dir):
+    """Extract data from all runs in the input directory."""
     os.makedirs(out_dir, exist_ok=True)
     runs = discover_shelve_bases(in_dir)
     if not runs:

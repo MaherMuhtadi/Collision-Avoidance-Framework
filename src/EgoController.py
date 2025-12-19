@@ -3,16 +3,7 @@ import numpy as np
 from pygame.locals import K_ESCAPE
 
 class EgoController:
-    """Keyboard controller for the ego vehicle.
-
-    Two modes are supported:
-    1. **Manual** – If *traffic_manager* is *None*, we generate throttle, brake, and
-       steering commands ourselves using ← / → / ↑ / ↓ and SPACE keys.
-    2. **Traffic‑Manager Autopilot** – If *traffic_manager* is provided we switch
-       the ego vehicle to autopilot (so Carla’s Traffic Manager handles all
-       low‑level control) **but** we still listen to ← / → keys and force a lane
-       change whenever the requested lane exists.
-    """
+    """Keyboard controller for the ego vehicle supporting manual and autopilot modes."""
 
     def __init__(self, ego, traffic_manager=None):
         pygame.init()
@@ -27,7 +18,7 @@ class EgoController:
             self.ego.set_autopilot(True, self.tm.get_port())
             self.tm.ignore_lights_percentage(self.ego, 100.0)
             self.tm.ignore_signs_percentage(self.ego, 100.0)
-            self.tm.vehicle_percentage_speed_difference(self.ego, -30) # Makes ego 30% faster
+            self.tm.vehicle_percentage_speed_difference(self.ego, -30)
 
         self.last_collision_actor = "None"
         self.collision_count = 0
@@ -35,15 +26,13 @@ class EgoController:
         self.steer_rate = 0.05
 
     def update_status(self, elapsed_time):
-        """Small on‑screen HUD for displaying vehicle status."""
+        """Display vehicle status on HUD."""
         control = self.ego.get_control()
         velocity = self.ego.get_velocity()
         speed_kmh = 3.6 * np.linalg.norm([velocity.x, velocity.y, velocity.z])
         speed_limit = self.ego.get_speed_limit()
         hours, remainder = divmod(elapsed_time, 3600)
         minutes, seconds = divmod(remainder, 60)
-
-        # Determine motion and assign color
         if control.reverse:
             speed_kmh = -speed_kmh
             motion, colour = "Reversing", (255, 140, 0)
@@ -68,39 +57,33 @@ class EgoController:
         pygame.display.flip()
 
     def track_collision(self, event):
-        """Callback for collision events."""
+        """Track collision events."""
         self.collision_count += 1
         self.last_collision_actor = event.other_actor.type_id
 
     def handle_vehicle_control(self):
-        """Dispatch to manual or TM‑autopilot control.
-
-        * Always listen for ESC / window close to allow clean exit (see
-          *check_exit_event*).
-        * When under autopilot we only react to ← → keys.
-        """
+        """Handle vehicle control based on mode."""
         if self.tm is None:
             self._manual_control()
         else:
             self._autopilot_lane_change()
 
     def check_exit_event(self):
-        """Check for exit events (ESC key or window close)."""
+        """Check for exit events."""
         for event in pygame.event.get():
             if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == K_ESCAPE):
                 return True
         return False
 
     def _autopilot_lane_change(self):
-        """Request lane change if left or right arrow key is pressed."""
+        """Handle lane change requests in autopilot mode."""
         pass
 
     def _manual_control(self):
-        """Manual control of the ego vehicle using keyboard input."""
+        """Handle manual vehicle control."""
         keys = pygame.key.get_pressed()
         control = self.ego.get_control()
 
-        # Throttle, brake, reverse logic
         vel = self.ego.get_velocity()
         speed = np.linalg.norm([vel.x, vel.y, vel.z])
         speed_limit = max(60.0, self.ego.get_speed_limit()) / 3.6
@@ -126,8 +109,7 @@ class EgoController:
         control.brake = 1.0 if keys[pygame.K_SPACE] else control.brake
         control.hand_brake = False
 
-        # Steering logic
-        max_steer, min_steer, max_speed = 0.3, 0.05, 25.0  # 25 m/s ≈ 90 km/h
+        max_steer, min_steer, max_speed = 0.3, 0.05, 25.0
         sensitivity = max(min_steer, max_steer * (1 - speed / max_speed))
         target = 0.0
         if keys[pygame.K_LEFT] and not keys[pygame.K_RIGHT]:
@@ -137,9 +119,9 @@ class EgoController:
         else:
             target = 0.0
         if target == 0.0:
-            delta_limit = self.steer_rate * 2  # faster return to center
+            delta_limit = self.steer_rate * 2
         else:
-            delta_limit = self.steer_rate      # normal steering rate
+            delta_limit = self.steer_rate
         delta = np.clip(target - self.current_steer, -delta_limit, delta_limit)
         self.current_steer += delta
         self.current_steer = np.clip(self.current_steer, -1.0, 1.0)
