@@ -1,4 +1,4 @@
-# Collision-Avoidance-Framework
+# Collision-Prediction-Framework
 
 A CARLA 0.9.15 data toolkit for transformer-based, multimodal collision prediction (targeting ~3 seconds before impact). It automates the data side so you can focus on modeling:
 
